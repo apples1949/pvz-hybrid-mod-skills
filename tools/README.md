@@ -127,6 +127,7 @@ python tools/pmod-toolchain/verify_pmod.py dist/<你的mod>.pmod
 这些脚本来自作者的 Windows 工作环境，**部分路径是写死的**，使用前请按你的环境修改：
 
 1. **游戏解包路径**：多处出现 `D:\zzz\pvzHE\解包\植物大战僵尸杂交版V0.28\`（引擎源码判据树），请替换为你的解包目录；
+   > 🧩 解包树**必须**用 [GDRE Tools（gdsdecomp）](https://github.com/GDRETools/gdsdecomp/releases) 解出（**禁止**其他工具 / 自制脚本），下载与用法见 **[UNPACKING.md](../UNPACKING.md)**。
 2. **两份游戏构建**：闸门脚本会各跑一遍 `…\0.28.1\植物大战僵尸杂交重制版\…` 与 `D:\zzz\植物大战僵尸重制版\…`，单构建用户改剩一份即可；
 3. **工作区路径**：`.cache` 系脚本假定在 `ModWorkspace/.cache/` 下运行，且多数引用同级生成器；
 4. **角色定制**：生成器顶部常量区（`MOD_NAME` / `CHAR_KEY` / 数值）就是给你改的——**只改常量，别重构**；

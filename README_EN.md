@@ -19,6 +19,7 @@ A **WorkBuddy Agent Skills** collection for modding *Plants vs. Zombies Hybrid E
 ## Table of Contents
 
 - [🚀 Quick Start (for beginners)](GETTING_STARTED.md)
+- [🧩 Unpacking the game (mandatory tool: GDRE Tools)](UNPACKING.md)
 - [What Is This](#what-is-this)
 - [The Three Skills at a Glance](#the-three-skills-at-a-glance)
 - [Repository Layout](#repository-layout)
@@ -62,6 +63,8 @@ pvz-hybrid-mod-skills/
 ├── README.md                       # Chinese documentation
 ├── README_EN.md                    # This file
 ├── GETTING_STARTED.md              # 🚀 Beginner quick start (run the template, change a stat, verify)
+├── UNPACKING.md                    # 🧩 Unpacking the game (mandatory tool: GDRE Tools — download / usage / self-check)
+├── CONTRIBUTING.md                 # Contribution guidelines (issues / PRs)
 ├── LICENSE                         # MIT
 ├── skills/                         # Three skill modules; each folder installs independently
     ├── pvz-hybrid-mod-authoring/
@@ -93,12 +96,15 @@ pvz-hybrid-mod-skills/
     └── case-docs/                  # Five full case-study delivery documents
 ```
 
+> `.github/` also hosts four issue forms (content error / tool bug / feature request / question) and a PR template.
+
 ## Installation & Configuration
 
 ### Prerequisites
 
 1. **WorkBuddy** (recommended — register via the invitation link at the top): skills are auto-loaded and executed by the WorkBuddy AI agent.
 2. An unpacked copy of *PvZ Hybrid Edition* **V0.28** (the skills constantly consult engine source `.cs` files and the `Asset/` structure as ground truth).
+   Unpacking **must** be done with [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases) — other tools and hand-written scripts are **not allowed**. See **[UNPACKING.md](UNPACKING.md)** for download and usage.
 3. See [Environment & Dependencies](#environment--dependencies).
 
 ### Steps
@@ -188,6 +194,7 @@ pvz-hybrid-mod-skills/
 |---|---|---|
 | **WorkBuddy** (recommended) | Runtime host for the skills | Register via the [invitation link](https://www.workbuddy.cn/events/invite?inviteCode=ryoc35nu7pi1nq); works as plain docs without it |
 | **PvZ Hybrid Edition V0.28 (unpacked)** | Ground-truth source | Skills read `addons/ModEditor/ModSystem/` (`ModLoader.cs`, `XWModManifest.cs`, …) and the `Asset/` structure |
+| **[GDRE Tools (gdsdecomp)](https://github.com/GDRETools/gdsdecomp/releases)** | **The only permitted unpacking tool** | ⛔ The game **must** be unpacked with GDRE — other unpackers, third-party PCK tools and hand-written parsers are banned. It is the only tool that handles this Godot 4 + C# (Mono) project's PCK checksums/encryption, binary-resource → text conversion, and C# assembly resolution. See **[UNPACKING.md](UNPACKING.md)** |
 | **Python ≥ 3.13** | Generators / gates / validators | Pure-math scripts need no third-party packages |
 | **Pillow (PIL)** | Skin conversion, matting, offline rendering, comparison images | `pip install pillow` |
 
@@ -282,10 +289,11 @@ Full guidelines: **[CONTRIBUTING.md](CONTRIBUTING.md)** (Chinese, with an Englis
 
 | Topic | Requirement |
 |---|---|
-| **Issues** | Use the forms under `.github/ISSUE_TEMPLATE/` (blank issues are disabled). Title: `[type] one-line conclusion`. Verifiable evidence is mandatory (code file + line number / in-game observation / log excerpt) — "I remember" and "it should be" are not accepted. |
+| **Unpacking** | ⛔ The game **must** be unpacked with [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases); other tools and hand-written scripts are banned, and agents must not work around this ([UNPACKING.md](UNPACKING.md)). |
+| **Issues** | Use the forms under `.github/ISSUE_TEMPLATE/` (blank issues are disabled). Title: `[type] one-line conclusion`. **Incomplete is fine** — write `未确认` / *unconfirmed* or `待补充` / *to be filled in*; incomplete issues are not closed. |
 | **PR branch** | `<type>/<scope>-<desc>`, type ∈ `feat` `fix` `docs` `tools` `chore` |
 | **Commit subject** | `<scope>: <imperative summary>` (≤72 chars, English, no trailing period). **Merging is squash-only, so the PR title becomes the commit subject.** |
-| **Verification** | Skill-content fixes need a before/after comparison; tool/generator changes need **on-disk assertions + negative tests** output. **"False green" verification is rejected** — assert against GOLD literals and give the produced artefact its own reconciliation assertion. |
+| **Verification** | **Recommended, not required**: skill-content fixes benefit from a before/after comparison, tool/generator changes from **on-disk assertions + negative tests** output. Never label unverified work as verified, and avoid "false green" assertions if you touch gates ([CONTRIBUTING](CONTRIBUTING.md) §4.4). |
 | **Never commit** | Build artifacts (`**/obj/`, `**/.build/`, `bin/`, generated mod projects, built `.pmod`, diff PNGs), `.workbuddy/` session data, one-off probe scripts. |
 | **`.bat` / `.cmd`** | Must be **ASCII-only with CRLF line endings and balanced parentheses** (cmd reads batch files byte-by-byte in the current code page; non-ASCII silently eats whole lines). |
 

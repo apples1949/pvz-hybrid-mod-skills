@@ -6,11 +6,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        提问前请先过一遍：
+        提问前不妨先过一遍：
         - [`GETTING_STARTED.md`](https://github.com/josnil/pvz-hybrid-mod-skills/blob/main/GETTING_STARTED.md)（含报错对照表）
+        - [`UNPACKING.md`](https://github.com/josnil/pvz-hybrid-mod-skills/blob/main/UNPACKING.md)（解包必须用 GDRE Tools）
         - [`tools/README.md`](https://github.com/josnil/pvz-hybrid-mod-skills/blob/main/tools/README.md)（环境适配与逐文件用法）
 
-        **说明你的目标 + 你已经试过什么**，能大幅提高一次解决的概率。
+        **说明你的目标 + 你已经试过什么**，能大幅提高一次解决的概率。信息不全也没关系，
+        填不了的地方写「未确认」或「待补充」即可——提问不会被拒收。
 
   - type: textarea
     id: goal
@@ -42,17 +44,17 @@ body:
     id: env
     attributes:
       label: 环境
-      description: 游戏版本 / 构建器版本 / Python 或 .NET 或 Godot 版本 / 操作系统
+      description: 游戏版本 / 构建器版本 / Python 或 .NET 或 Godot 版本 / 操作系统；不清楚可留空
       placeholder: 游戏 V0.28；构建器 v0.28；Python 3.13；Windows 11
     validations:
-      required: true
+      required: false
 
   - type: checkboxes
     id: precheck
     attributes:
       label: 提交前自查
       options:
-        - label: 我已阅读 GETTING_STARTED.md 与 tools/README.md
+        - label: 我已看过 GETTING_STARTED.md / UNPACKING.md / tools/README.md 里相关的一节
           required: true
-        - label: 我已搜索过现有 Issue，确认不是重复提问
+        - label: 我没有编造内容——拿不准的地方我标了「未确认」或「待补充」
           required: true

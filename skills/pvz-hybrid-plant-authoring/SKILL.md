@@ -21,6 +21,11 @@ agent_created: true
 > 本技能是**植物专用精简流程**。凡与 `pvz-hybrid-mod-authoring` 冲突，**以那份 + 源码为准**（它更新更勤）。
 > 本技能负责「按什么顺序做、每步的硬约束、哪一步最容易白忙」。
 
+> **⛔ 解包前置（硬性）**：上表的「引擎源码真相」必须来自**解包树**，而解包**只能**用
+> [GDRE Tools（gdsdecomp）](https://github.com/GDRETools/gdsdecomp/releases)（[下载说明与使用方法](../../UNPACKING.md)）。
+> **禁止**使用其他解包器、第三方 PCK 工具或自制解析脚本；用户要求解包时请引导其下载 GDRE，**不要自己写解析器**。
+> 自检判据：树里同时有 `Asset/`、`Prefab/`、`addons/ModEditor/ModSystem/`，且能搜到 `Asset/Config/Projectile/ProjectileResource.json`。
+
 **已知边界**：游戏内置的「PVZ Mod 编辑器」是游戏内 GUI（F3 唤起），**AI 无法驱动它**。但它的产物
 `.pmod` = zip + 根 `mod.json`，**可以纯脚本生成** —— 这就是整套工具链的基础。
 

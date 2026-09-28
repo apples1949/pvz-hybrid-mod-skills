@@ -11,7 +11,12 @@ body:
         > ⚠️ 本仓库的 `SKILL.md` 会被 AI 直接当作指令加载，**一条错的结论会持续误导后续所有会话**，
         > 所以请尽量给出可被第三方独立复现的证据。
 
-        提交前请确认：① 已阅读 `CONTRIBUTING.md` 的第 1、2 节；② **一个 Issue 只讲一件事**。
+        提交前请确认：① 已看过 `CONTRIBUTING.md` 的 Issue 规范；② **信息不全没关系**——
+        填不了的地方直接写「未确认」或「待补充」，Issue 不会被拒收。
+
+        > 若问题与"解包树不对 / 找不到资源 / 行号对不上"有关，请先确认是用
+        > [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases) 解包的（[说明](https://github.com/josnil/pvz-hybrid-mod-skills/blob/main/UNPACKING.md)）。
+        > 本仓库**只承认 GDRE 解出来的树**，其他工具解出的树不构成有效判据。
 
   - type: dropdown
     id: target
@@ -50,13 +55,14 @@ body:
   - type: textarea
     id: evidence
     attributes:
-      label: 为什么是错的（证据）
-      description: 可验证来源：代码文件+行号 / 游戏内实测 / 日志片段 / 官方行为。不接受「我记得」「应该是」
+      label: 为什么是错的（有出处最好）
+      description: 出处可以是代码文件+行号 / 游戏内实测 / 日志片段 / 官方行为。没有确凿出处也没关系，写「暂无法提供」或「凭印象，未验证」即可——但别把它写成已验证
       placeholder: |
         例：TowerDefenseManager.cs:520 的 `if (!item.characterFilter)` 表明……
         例：游戏 V0.28 实测，在 XX 条件下出现 YY 现象，日志片段见下
+        例：没有确凿出处，只是照文档做的时候觉得不对
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: correct
@@ -70,27 +76,25 @@ body:
     id: impact
     attributes:
       label: 影响面
-      description: 按这条错内容操作会导致什么后果（浪费时间 / 流程跑不通 / 崩游戏 / 损坏存档……）
+      description: 按这条错内容操作会导致什么后果（浪费时间 / 流程跑不通 / 崩游戏 / 损坏存档……）；不确定可留空
     validations:
-      required: true
+      required: false
 
   - type: input
     id: env
     attributes:
       label: 环境
-      description: 游戏版本 / 构建器版本 / .NET 或 Godot 版本 / 操作系统
+      description: 游戏版本 / 构建器版本 / .NET 或 Godot 版本 / 操作系统；不清楚可留空
       placeholder: 游戏 V0.28；构建器 v0.28；.NET 9；Windows 11
     validations:
-      required: true
+      required: false
 
   - type: checkboxes
     id: precheck
     attributes:
       label: 提交前自查
       options:
-        - label: 我已阅读 CONTRIBUTING.md 的 Issue 规范
+        - label: 我已看过 CONTRIBUTING.md 的 Issue 规范
           required: true
-        - label: 本 Issue 只讲一件事
-          required: true
-        - label: 我给出的证据可被第三方独立复现
+        - label: 我没有编造内容——拿不准的地方我标了「未确认」或「待补充」
           required: true

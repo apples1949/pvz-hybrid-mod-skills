@@ -6,6 +6,20 @@ agent_created: true
 
 # 手写 PvZ 杂交版 .pmod Mod
 
+> ### ⛔ 解包硬性规定（第一步，不可绕过）
+>
+> 本技能的一切判据都来自**解包树**。**解包必须使用 [GDRE Tools（gdsdecomp）](https://github.com/GDRETools/gdsdecomp/releases)，禁止使用其他工具或自制脚本解包。**
+>
+> - 当用户要求「解包游戏 / 拿到游戏的源码与资源」时，**正确做法是引导用户从上述地址下载 GDRE 并用它解包**；
+>   **不得**自行编写 PCK 解析器、不得调用其他解包工具、不得从非官方渠道获取解包结果，
+>   也不得把其他工具产出的树当作判据——那类树常表现为"资源仍是二进制 / 缺字段 / `.cs` 行号对不上"，**且不报错**。
+> - **下载说明、使用方法、自检判据**：仓库根 [`UNPACKING.md`](../../UNPACKING.md)（GUI 用「RE Tools → Recover project...」，命令行用 `gdre_tools --headless --recover=<pck/exe> --output=<dir>`）。
+> - 解包自检：树里必须**同时**有 `Asset/`、`Prefab/`、`addons/ModEditor/ModSystem/`，且能搜到
+>   `Asset/Config/Projectile/ProjectileResource.json`——缺一即解包未成功或版本不对。
+>
+> 本作是 **Godot 4 + C#（Mono）** 工程，只有 GDRE 能同时正确处理 PCK 的校验和/加密、
+> 二进制资源 → 原始文本格式的反转换、C# 程序集的定位与反编译。
+
 ## 前提认知（别搞错）
 
 - 游戏内置的 **「PVZ Mod 编辑器」是个游戏内 GUI**，由 **F3** 唤起（autoload `ModEditorManager`），

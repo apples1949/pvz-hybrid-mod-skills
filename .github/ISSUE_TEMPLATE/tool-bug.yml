@@ -6,8 +6,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        提交前请确认：① 已按 `tools/README.md` 完成**环境适配**（解包后的游戏目录 + 路径改写）；
-        ② 已跑过默认参数以建立基线；③ **一个 Issue 只讲一件事**。
+        提交前请尽量确认：① 已按 `tools/README.md` 完成**环境适配**（解包后的游戏目录 + 路径改写）。
+        **信息不全没关系**——填不了的地方写「未确认」或「待补充」，Issue 不会被拒收。
+
+        > 解包必须使用 [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases)（[说明](https://github.com/josnil/pvz-hybrid-mod-skills/blob/main/UNPACKING.md)）。
+        > 其他工具或自制脚本解出来的树不构成有效判据——相关问题请先改用 GDRE 重新解包复验。
 
   - type: dropdown
     id: tool
@@ -39,9 +42,9 @@ body:
   - type: textarea
     id: expected
     attributes:
-      label: 预期结果
+      label: 预期结果（可选）
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: actual
@@ -55,23 +58,23 @@ body:
   - type: textarea
     id: repro
     attributes:
-      label: 最小复现步骤
-      description: 从干净环境开始，能稳定复现的最短路径
+      label: 最小复现步骤（可选）
+      description: 从干净环境开始、能稳定复现的最短路径；暂时理不清可以先留空
       placeholder: |
         1.
         2.
         3.
     validations:
-      required: true
+      required: false
 
   - type: input
     id: env
     attributes:
       label: 环境
-      description: 游戏版本 / 构建器版本 / Python 或 .NET 或 Godot 版本 / 操作系统
+      description: 游戏版本 / 构建器版本 / Python 或 .NET 或 Godot 版本 / 操作系统；不清楚可留空
       placeholder: 游戏 V0.28；Python 3.13；.NET 9；Windows 11
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: extra
@@ -86,9 +89,9 @@ body:
     attributes:
       label: 提交前自查
       options:
-        - label: 我已阅读 CONTRIBUTING.md 的 Issue 规范
+        - label: 我已看过 CONTRIBUTING.md 的 Issue 规范
           required: true
-        - label: 我已按 tools/README.md 完成环境适配，并用默认参数跑过基线
+        - label: 我的解包树是用 GDRE Tools 解出来的（不是其他工具或自制脚本）
           required: true
-        - label: 我粘贴的是完整输出而非节选
+        - label: 我没有编造内容——拿不准的地方我标了「未确认」或「待补充」
           required: true

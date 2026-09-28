@@ -26,6 +26,8 @@
 > ① 确认本机 Python ≥ 3.13（没有就装）；
 > ② 我的游戏解包目录在 `<你的路径>`，请把 `tools/plant/` 下生成器与闸门脚本里写死的作者路径（`D:\zzz\pvzHE\...`、remake/console 双构建）替换成我的（我只有一份构建，闸门只跑它）；
 > ③ 替换后跑 `python tools/plant/build_plant_super_gatling.py --self-check`，把结果贴给我。
+>
+> 若我还没有解包树：请**引导我下载 GDRE Tools 并用它解包**（见 `UNPACKING.md`），**不要**自己写 PCK 解析器或用其他解包工具。
 
 三个前提：
 
@@ -35,7 +37,9 @@
 | **游戏解包目录** | 含 `Asset/`、`Prefab/`、`addons/ModEditor/ModSystem/` 的树。生成器要读里面的基底资源，技能文档所有"以源码为准"的判据也指向它。确认找对了：能找到 `Asset/Config/Projectile/ProjectileResource.json` |
 | **路径适配** | 仓库脚本按作者 Windows 环境写死了绝对路径；这一步没做完，生成器跑不起来 |
 
-> 手头还没有解包树？跳到文末「[热身备选](#热身备选零解包的-5-分钟)」先感受一下打包-校验闭环，回头再回来。
+> 🧩 **还没有解包树？** 先看 **[UNPACKING.md](UNPACKING.md)**——解包**只能**用
+> [GDRE Tools（gdsdecomp）](https://github.com/GDRETools/gdsdecomp/releases)，**禁止**使用其他工具或自制脚本
+> （包括让 agent 自己写 PCK 解析器）。或者跳到文末「[热身备选](#热身备选零解包的-5-分钟)」先感受一下打包-校验闭环，回头再补。
 
 ---
 
@@ -116,7 +120,7 @@ python tools/pmod-toolchain/verify_pmod.py dist/SuperGatlingPea/*.pmod   # ③ �
 
 | 症状 | 去哪查 |
 |---|---|
-| 生成器跑不起来 / 找不到基底资源 | 多半是「环境适配」没做完或解包树版本不对——重跑 `--self-check` 看报错，对照 `tools/README.md` 环境适配节 |
+| 生成器跑不起来 / 找不到基底资源 | 多半是「环境适配」没做完或解包树不对——先按 [UNPACKING.md](UNPACKING.md) 确认树是 GDRE Tools 解出来的、且能搜到 `Asset/Config/Projectile/ProjectileResource.json`；再重跑 `--self-check` 看报错，对照 `tools/README.md` 环境适配节 |
 | `.pmod` 被拒收 / 加载后回滚 | `PVZHE_Logs` 的 `[ModLoader]` 行；关键词对照 `skills/pvz-hybrid-mod-authoring` 的「铁律」节与 `tools/pmod-toolchain/docs/README.md` |
 | 植物动画播了但没子弹 | `skills/pvz-hybrid-plant-authoring` Step 4（漏 `ComponentSet`）与 Step 5（动画 `events` 缺 `fire`） |
 | 自定义皮肤动画完全静止 | 委托插件设 `forceLocalRender` + `forceCpuPoseRender`（`tools/zombie/runtime_shared/AnimeSpriteLocalRender.cs` 是现成实现；完整案例见奶龙僵尸交付说明） |

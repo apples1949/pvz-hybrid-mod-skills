@@ -17,6 +17,7 @@
 ## 目录
 
 - [🚀 快速上手（小白必读）](GETTING_STARTED.md)
+- [🧩 解包游戏（唯一指定工具：GDRE Tools）](UNPACKING.md)
 - [这是什么](#这是什么)
 - [三个技能总览](#三个技能总览)
 - [仓库结构](#仓库结构)
@@ -61,6 +62,8 @@ pvz-hybrid-mod-skills/
 ├── README.md                       # 本文档（中文）
 ├── README_EN.md                    # 英文文档
 ├── GETTING_STARTED.md              # 🚀 小白快速上手（跑通样板 + 改数值做出第一个 Mod）
+├── UNPACKING.md                    # 🧩 解包游戏（唯一指定工具 GDRE Tools：下载说明 / 使用方法 / 自检）
+├── CONTRIBUTING.md                 # 贡献规范（Issue / PR）
 ├── LICENSE                         # MIT
 ├── skills/                         # 三个技能模块，每个文件夹即一个可独立安装的技能
     ├── pvz-hybrid-mod-authoring/
@@ -92,12 +95,15 @@ pvz-hybrid-mod-skills/
     └── case-docs/                  # 五份成套案例交付文档
 ```
 
+> `.github/` 下另有 Issue 表单 ×4（内容纠错 / 工具缺陷 / 提案 / 提问）与 PR 模板。
+
 ## 安装与配置
 
 ### 前置条件
 
 1. **WorkBuddy**（推荐，通过顶部邀请链接注册）：技能由 WorkBuddy 的 AI 助手自动加载与执行。
 2. 《植物大战僵尸杂交版》**V0.28 解包目录**（技能大量引用其中的引擎源码 `.cs` 与资源结构作为"事实判据"）。
+   **解包必须使用 [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases)，禁止使用其他工具或自制脚本**——下载说明、使用方法与自检步骤见 **[UNPACKING.md](UNPACKING.md)**。
 3. 见下文[环境与依赖清单](#环境与依赖清单)。
 
 ### 安装步骤
@@ -187,6 +193,7 @@ pvz-hybrid-mod-skills/
 |---|---|---|
 | **WorkBuddy**（推荐） | 技能的运行载体 | 通过[邀请链接](https://www.workbuddy.cn/events/invite?inviteCode=ryoc35nu7pi1nq)注册；不用 WorkBuddy 也可当文档读 |
 | **《植物大战僵尸杂交版》V0.28 解包** | 事实判据来源 | 技能需要读 `addons/ModEditor/ModSystem/` 下的引擎源码（`ModLoader.cs`、`XWModManifest.cs` 等）与 `Asset/` 资源结构 |
+| **[GDRE Tools（gdsdecomp）](https://github.com/GDRETools/gdsdecomp/releases)** | **解包游戏的唯一指定工具** | ⛔ **必须**用它解包，**禁止**其他工具 / 第三方 PCK 工具 / 自制脚本。只有它能正确处理本作（Godot 4 + C# Mono）的 PCK 校验和与加密、二进制资源 → 文本反转换、C# 程序集定位。详见 **[UNPACKING.md](UNPACKING.md)** |
 | **Python ≥ 3.13** | 生成器 / 闸门 / 校验脚本 | 纯数学脚本零第三方依赖 |
 | **Pillow (PIL)** | 外观直转、抠像、离线渲染、对照图 | `pip install pillow` |
 
@@ -280,10 +287,11 @@ pvz-hybrid-mod-skills/
 
 | 事项 | 要求 |
 |---|---|
-| **Issue** | 必须使用 `.github/ISSUE_TEMPLATE/` 下的表单（空白 Issue 已关闭）；标题格式 `[类型] 一句话结论`；必须给出**可验证证据**（代码文件+行号 / 游戏实测 / 日志片段），不接受「我记得」「应该是」 |
+| **解包** | ⛔ 游戏解包**只能**用 [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases)，**禁止**其他工具或自制脚本；agent 不得绕过（详见 [UNPACKING.md](UNPACKING.md)） |
+| **Issue** | 用 `.github/ISSUE_TEMPLATE/` 下的表单（空白 Issue 已关闭）；标题 `[类型] 一句话结论`；**信息不全没关系**——填不了就写「未确认」或「待补充」，不会因此被拒收 |
 | **PR 分支** | `<type>/<scope>-<desc>`，type ∈ `feat` `fix` `docs` `tools` `chore` |
 | **提交信息** | `<scope>: <imperative summary>`（首行 ≤72 字符，英文，不加句号）；**合并采用 squash，PR 标题会直接成为提交信息** |
-| **验证证据** | 修正技能内容需**修改前后对照**；改动工具/生成器需 **on-disk 断言 + 负向测试**运行输出；**不接受「假绿」验证**（必须比 GOLD 字面量，且实现产物自己有对账断言） |
+| **验证证据** | **建议提供（非门槛）**：修正技能内容给出处 + 前后对照；改动工具/生成器贴 on-disk 断言 + 负向测试输出。**没有也能提**，但别把没验证的写成已验证；若动了闸门，注意别造「假绿」（详见 [CONTRIBUTING](CONTRIBUTING.md) §4.4） |
 | **禁止入库** | 构建产物（`**/obj/`、`**/.build/`、`bin/`、生成的 mod 工程、构建好的 `.pmod`、对比 PNG）、`.workbuddy/` 会话数据、一次性探针脚本 |
 | **`.bat` / `.cmd`** | 必须**纯 ASCII + CRLF 行尾 + 括号平衡**（cmd 按当前代码页逐字节读脚本，非 ASCII 会导致整行被吞） |
 
