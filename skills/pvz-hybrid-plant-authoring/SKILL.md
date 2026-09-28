@@ -190,6 +190,39 @@ script = ExtResource("2")
 - 头位/炮口标定、双图层父子精灵（头独立）范式、自制 `.dat` 的 5 个必踩坑
   → `references/plant-skin.md`。
 
+**★ 「卡面 / 立绘」从哪来 + 先检查解包完整性（2026-09-28 实测，做识别/外观类 Mod 必看）**
+
+* 一个角色在 `Asset/Config/Character/CharacterResource.json` 里就是**三键 uid 引用**：
+  `{ "Packet": {"<卡key>": uid}, "Scene": uid, "Sprite": uid }`（V0.29 实测 583 条全是这个形状）
+  * `Packet` → `.../Packet/<卡key>.tres`（`TowerDefensePacketConfig`：`saveKey` / `cost` /
+    `packetAnimeOffset` / `packetAnimeScale` / `unlockCheckList` / `characterConfig`）；
+  * `Scene` → `.../Scene/TowerDefensePlant<Key>.tscn`（战斗中的植物）；
+  * **`Sprite` → 同级 `.../<Key>.tscn`** ← **这就是「卡面/立绘预览」**
+    （`AdobeAnimateSpriteBase` + `flashAnimeData` + `Animation/Clip = "Idle"`）。
+* ⇒ **卡槽里显示的不是现成 PNG，而是同一套植物精灵按 `packetAnimeOffset/Scale` 摆放**。
+  因此「换卡面」动的是**同一份资源，会同时影响卡槽与场上单位**——做外观类 Mod 必须先拍板这点。
+* ⇒ 想**离线取立绘**就必须能解开 `.dat`（图片都在里面，见上条）。
+  ⚠️ **第一步先检查解包到底有没有 `.dat`**：2026-09-28 实测一份"完整解包"
+  （`植物大战僵尸杂交版V0.29`，根目录 551 项 + 完整 `Asset/` 树）里**一个 `.dat` 都没有**
+  （全盘仅 `icudt_godot.dat`，是 ICU 国际化数据，无关）。
+  这类解包能读 `.cs/.tres/.tscn/.json`，但**做不了离线取图**；取图只能走
+  「游戏内实例化 `<Key>.tscn` → `SubViewport` 渲染 → `GetImage()` 回读」
+  （上游 STS2 Mod 的 `PortraitGpuImageLoader` 就是这个套路，可照抄）。
+  同理：**这类解包也没有 `.dll/.exe/.pck/data_*`** ⇒ 不能编译插件、不能实机验证。
+* **图片替换的正规入口**：`<Key>.tscn` 里逐媒体列着
+  `Animation/MediaReplace/<媒体名>.png = null` 槽位（如 `.../CactusBlover_head.png`）。
+  比"改节点 `Texture`"规矩，但**是逐媒体替换**（一个植物十几个图层），批量做不现实。
+* **「自定义皮肤」≠ 贴任意图**：`Custom/<Key>CoustomData.tres`(`CharacterCustomData`) +
+  `Custom/Config/<Key>Custom0.tres`(`CharacterCustomConfig`) 靠
+  `animeFliterOpen` / `animeFliterClose`（如 `"skin1&skin2"` / `"Blover_head&Blover_petals"`）
+  **切图层显隐**，前提是美术已在 `.dat` 里预置 `skin1..skin8` 图层。
+* **规模基准（V0.29 实测，用来判断"按图遍历全卡池"这类需求的难度）**：
+  植物目录 **330 个**（Chapter0 41 / Other 47 / Cover 28 / Star 27 / Gold 19 / …）、
+  `CharacterResource.json` **583 条**、`PacketBankResource.json` **顶层 12 个卡池**、
+  `GeneralPlant` 共 **276 张**（White188 / Gold19 / Diamond16 / Colour6 / Star27 / Original20，
+  `Include: ["OriginalPlant"]`）。
+  ⚠️ 与旧口径（V0.28 的"22 池 / White178"）不同，引用数字时**先按手上的版本核一遍**。
+
 ### Step 7 — 让卡「能被选到」+ 进图鉴（**只有需要时才做**）
 
 因果链：
