@@ -1598,6 +1598,27 @@ insertLayerId = 16
 ⇒ `Runtime/` 下只能有 `ModAssembly.dll`。`.pdb` 不在该名单里（会被 `IsDeclaredRuntimeSymbols`
 静默跳过），但既然没用就别放。构建脚本结尾加一条"只允许 ModAssembly.dll"的硬护栏。
 
+### ★ `Runtime/Dependencies/` 是官方预留的「托管依赖」目录（2026-09-28 源码复核）
+上面那条**有一条唯一例外**：`ModLoader.IsRuntimeDependencyFile`（`ModLoader.cs:959-977`，
+被 `ValidateDeclaredPackageExecutables` 的 `:343` 与 `LoadMod` 的 `:534` 两处引用）
+对 `Runtime/Dependencies/<单个文件名>` 放行**任意 `.dll`**（`.pdb` 也放行）；
+判定**只看扩展名、不看内容**，且**文件名里不许再含 `/`**（不递归子目录）。
+并且这个目录是**程序集探测根**——`XWModCharacterCompanionRuntime.cs:72-76` 传给
+`LoadModAssembly` 的 probingRoots 恰是 `[程序集所在目录, 程序集目录/Dependencies]`：
+* **PC**：`ModLoadContext.Load`（`XWModAssemblyLoader.cs:113-142`）先走
+  `AssemblyDependencyResolver`（依赖 `.deps.json`），再逐个 probing root 找 `<AssemblyName.Name>.dll`；
+* **安卓**：`EnumerateAndroidDependencies`（`:259-293`）把该目录下**所有** `*.dll` 先
+  `LoadAndroidAssemblyFile`（`:296-336`）加载进 Default ALC，再加载主程序集。
+
+⇒ **要随包分发托管依赖（第三方库 DLL）就放 `Runtime/Dependencies/`**，别往 `Runtime/` 根塞。
+⚠️ **不要把「原生库」放进去**：安卓路径对目录里每个文件都调
+`AssemblyName.GetAssemblyName(path)`（`:299`），而原生 DLL 不是合法托管程序集 ⇒ 抛
+`BadImageFormatException`，且 `LoadAndroidAssembly`（`:251-255`）**外层没有 try/catch**
+⇒ 推断：**整个 Mod 加载失败**（PC 走 ALC + `ResolvingUnmanagedDll`，不受此条影响）。
+需要原生库时只有两条正路：**限定 PC-only 并自写 `NativeLibrary.Load` / `ResolvingUnmanagedDll` 解析**，
+或换纯托管实现（如把推理降级为不依赖原生库的算法）。
+🚫 **明令禁止**用「把原生库改扩展名混过 `IsExecutablePackageFile`」之类手段规避官方闸门。
+
 `runtimeAssemblyPolicy: "optional"` ⇒ `IsRuntimeAssemblyRequired() == false`
 ⇒ 程序集加载失败**不连坐**整包（新 Mod 建议先 optional）。
 
