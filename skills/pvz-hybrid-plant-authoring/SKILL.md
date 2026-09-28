@@ -1,6 +1,6 @@
 ---
 name: pvz-hybrid-plant-authoring
-description: 为《植物大战僵尸杂交版》(Godot 4 + C#) 从零制作或改造一个「植物」Mod 的端到端流程——建包、写植物配置与卡片、让卡进选卡界面与图鉴、调发射（射速/弹数/散射/动画事件表）、换外观（经典 reanim 官方素材直转或自制逐帧）、必要时写托管 C# 插件做概率/连射/真随机/修「动画静止」，以及全套离线闸门与实机验收。当用户要求「做一个植物 Mod」「加个新植物」「改某植物的射速/伤害/血量/费用/冷却」「让它进图鉴/能在选卡里选到」「换植物贴图或动画」「植物打不出子弹」「植物动画不动/暂停才跳帧」「植物种不到空地」或提到 TowerDefensePlantConfig / TowerDefensePacketConfig / ComponentSet / FireComponent / FireComponentFireProjectileConfig / CharacterSprite / build_plant_*.py / 植物 .pmod 时使用。
+description: 为《植物大战僵尸杂交版》(Godot 4 + C#) 从零制作或改造一个「植物」Mod 的端到端流程——建包、写植物配置与卡片、让卡进选卡界面与图鉴、调发射（射速/弹数/散射/动画事件表）、换外观（经典 reanim 官方素材直转或自制逐帧）、必要时写托管 C# 插件做概率/连射/真随机/修「动画静止」，以及全套离线闸门与实机验收。当用户要求「做一个植物 Mod」「加个新植物」「改某植物的射速/伤害/血量/费用/冷却」「让它进图鉴/能在选卡里选到」「换植物贴图或动画」「植物打不出子弹」「植物动画不动/暂停才跳帧」「植物种不到空地」或提到 TowerDefensePlantConfig / TowerDefensePacketConfig / ComponentSet / FireComponent / FireComponentFireProjectileConfig / CharacterSprite / build_plant_*.py / **csproj `<AssemblyName>` / 程序集名唯一 / 安卓加载失败 / runtimeAssembly 能不能改** / 植物 .pmod 时使用。
 agent_created: true
 ---
 
@@ -229,16 +229,23 @@ override 里**只写 `coverCanDirectPlant` 一个字段**（其余默认值全�
 
 ### Step 9 — 需要插件时（决定 B）
 
-四条硬约束（写错 = **整包被拒/回滚**）：
+五条硬约束（写错 = **整包被拒/回滚**）：
 
-1. `runtimeAssembly` **必须恰好是字面量** `"Runtime/ModAssembly.dll"`；
+1. `runtimeAssembly` **必须恰好是字面量** `"Runtime/ModAssembly.dll"`（**这是包内物理路径，不许改**）；
 2. `runtimeApiVersion` **必须恰好 `1`**；入口三个回调**一律 try/catch 绝不抛**（抛 = 无条件整包回滚）；
 3. `provides`/`overrides` 非空时，包内**每个**被识别的文件都必须在里面声明；
-4. `Runtime/` 目录**只许有一个** `ModAssembly.dll`（`.dll/.exe/.bat/.cmd/.ps1/.cs/.gd` 都算可执行文件，多一个就拒收）。
+4. `Runtime/` 目录**只许有一个** `ModAssembly.dll`（`.dll/.exe/.bat/.cmd/.ps1/.cs/.gd` 都算可执行文件，多一个就拒收）；
+5. ★★★ **`.csproj` 必须写 `<AssemblyName>【本 Mod 的 <Key>】</AssemblyName>`** ——
+   **安卓**的 DLL 加载方式与 PC 不同（全 Mod 共用一个非可回收上下文，程序集名撞车直接
+   `Android Mod assemblies share one non-collectible context, so main assembly names must be unique`）；
+   而 `mod.json` 的 `runtimeAssembly` **仍保持** `"Runtime/ModAssembly.dll"` 不变
+   （容器里的文件名永远是它，变的是**程序集身份**）。
+   构建脚本取产物要写成 `os.path.join(out_dir, ASSEMBLY_NAME + ".dll")` 再改名为 `ModAssembly.dll` 装机。
+   **依据 + 三条自检 → `references/plant-runtime-plugin.md` §1.1**。
 
 配方（已实测）：概率大招、逐颗连射、真随机、**掐掉原版开火链**、**修「动画静止」**、
 **与僵尸版「共用判定逻辑」（共享源文件 + 两问守卫）**
-→ `references/plant-runtime-plugin.md`（§7 讲共用源文件的坑）。
+→ `references/plant-runtime-plugin.md`（§1.1 程序集名，§7 讲共用源文件的坑）。
 
 ### Step 10 — 写/跑闸门（**这一步不能省**）
 

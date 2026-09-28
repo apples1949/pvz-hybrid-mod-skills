@@ -1,6 +1,6 @@
 ---
 name: pvz-hybrid-mod-authoring
-description: 手写/生成《植物大战僵尸杂交版》(Godot 4 + C#) 的 .pmod Mod 包——覆盖内置资源（子弹/地图/角色/关卡/商店/收集物/铲子/推车/生存/教程/NPC对话/BGM/音频/纹理/图集）或做托管代码 Mod。也包含游戏外运行的图形编辑器 mod_editor.py（改数值/打包/校验，免写代码），以及「从单张角色截图制作角色贴图」的抠像 + 逐帧动画流程（透明底、待机/射击、锚点对齐）。当用户要求「做个 Mod」「改游戏资源数值」「覆盖子弹伤害」「打包 pmod」「写 mod.json」「打开 Mod 编辑器」「按这张图做角色贴图」「做待机/射击动画」或提到 .pmod / mod.json / ModLoader / XWModManifest / ModEditor / mod_editor / Mods 目录 / overrides / provides / 角色贴图 / 序列帧 / 图集 / 透明底 时使用。
+description: 手写/生成《植物大战僵尸杂交版》(Godot 4 + C#) 的 .pmod Mod 包——覆盖内置资源（子弹/地图/角色/关卡/商店/收集物/铲子/推车/生存/教程/NPC对话/BGM/音频/纹理/图集）或做托管代码 Mod。也包含游戏外运行的图形编辑器 mod_editor.py（改数值/打包/校验，免写代码），以及「从单张角色截图制作角色贴图」的抠像 + 逐帧动画流程（透明底、待机/射击、锚点对齐）。当用户要求「做个 Mod」「改游戏资源数值」「覆盖子弹伤害」「打包 pmod」「写 mod.json」「打开 Mod 编辑器」「按这张图做角色贴图」「做待机/射击动画」或提到 .pmod / mod.json / ModLoader / XWModManifest / ModEditor / mod_editor / Mods 目录 / overrides / provides / 角色贴图 / 序列帧 / 图集 / 透明底 时使用。也覆盖 **csproj `<AssemblyName>` 与安卓程序集名唯一性 / `runtimeAssembly` 为何必须保持 `Runtime/ModAssembly.dll`** 这类跨平台打包问题。
 agent_created: true
 ---
 
@@ -63,7 +63,8 @@ agent_created: true
 Xxx.pmod                          # zip, ZIP_DEFLATED
 ├── mod.json                      # 必须【根】且【唯一】，≤ 1 MiB
 ├── Resources/Projectiles/A.tres  # 路径前缀决定类别，文件名=key
-└── Runtime/ModAssembly.dll       # 只有托管插件才需要；路径是硬编码字面量，见「托管代码 Mod」节
+└── Runtime/ModAssembly.dll       # 只有托管插件才需要；路径是硬编码字面量（**不许改**），见「托管代码 Mod」节
+                                  #   ⚠️ 但 csproj 的 <AssemblyName> 必须是**本 Mod 自己的键**（安卓要求唯一）
 ```
 
 打包时**排除**：`.uid` `.import` `.cs` `.csproj` `.sln` `.build/` `bin/` `obj/`
@@ -1577,6 +1578,8 @@ insertLayerId = 16
 ### 四条硬约束（写错 = 整包被拒 / 回滚）
 1. `runtimeAssembly` **必须恰好是字面量** `"Runtime/ModAssembly.dll"`（`ModLoader.cs:329-333` +
    `ResolveDeclaredRuntimeAssembly:918`）——写别的路径**硬拒**，`policy` 救不了。
+   ⚠️ 这是**包内物理路径**，**不是**程序集身份 —— 程序集身份另有一条安卓专属协定，
+   见下面 **「★★★ 跨平台（安卓）程序集标识」**（**每个 Mod 的 `.csproj` 都必须写自己的 `<AssemblyName>`**）。
 2. `runtimeApiVersion` **必须恰好 `1`**，否则入口 init 返回 false → **无条件整包回滚**；
    `TryInitializeRuntimeEntry` 失败（`ModLoader.cs:667-671`）同样是**不设防硬拒**，
    连 `policy="optional"` 都保不住 ⇒ 三个回调必须 try/catch。
@@ -1598,6 +1601,77 @@ insertLayerId = 16
 `runtimeAssemblyPolicy: "optional"` ⇒ `IsRuntimeAssemblyRequired() == false`
 ⇒ 程序集加载失败**不连坐**整包（新 Mod 建议先 optional）。
 
+### ★★★ 跨平台（安卓）程序集标识：`.csproj` 必须写 `<AssemblyName>`，`mod.json` 保持 `Runtime/ModAssembly.dll`
+
+> **两个名字是两回事，别混。** 安卓的系统 DLL 加载方式与 PC 不同 ⇒ 程序集**身份（AssemblyName）**
+> 必须每个 Mod 唯一；而包内**物理文件名**一字不改。
+
+| 名字 | 写在哪 | 值 | 能改吗 |
+|---|---|---|---|
+| **包内物理路径** | `mod.json` → `runtimeAssembly` | **恰好** `"Runtime/ModAssembly.dll"` | ❌ **一个字都不能改**（硬校验，改 = 整包被拒） |
+| **程序集身份** `AssemblyName` | `.csproj` → `<AssemblyName>` | **本 Mod 的 `<Key>`**（每个 Mod 唯一，如 `SuperGatlingPaper`） | ✅ **必须改成自己的** |
+
+```xml
+<PropertyGroup>
+  <!-- ★ 默认值会给成 ModAssembly（= 包内文件名），安卓上会和别的 Mod 撞车 -->
+  <AssemblyName>SuperGatlingPaper</AssemblyName>
+</PropertyGroup>
+```
+
+**为什么（源码实测）**：
+
+* **PC**：`XWModAssemblyLoader` 走 `:195-197` 的 `ModLoadContext` —— **每个 Mod 一个独立、可回收的 ALC**
+  （`bool flag = !OperatingSystem.IsAndroid()`，`:188`）⇒ 两个都叫 `ModAssembly` 的程序集**互不干扰**，
+  所以这个坑在 Windows 上**永远不暴露**。
+* **安卓**：走 `:191-193` 的 `LoadAndroidAssembly` —— 全 Mod 共享**一个非可回收上下文**。
+  它按**简单程序集名**（`assemblyName.Name`，`OrdinalIgnoreCase`）在静态表
+  `AndroidLoadedAssemblies` 里记账（`:151` / `:299-315`），撞上就
+  `throw BuildAndroidAssemblyConflict(...)`（`:314`，定义在 `:338-341`），原文：
+  > `Android Mod '<id>' cannot load assembly '<requested>'. … Android Mod assemblies share one
+  > non-collectible context, so main assembly names must be unique.`
+  ⇒ **所有 Mod 都叫 `ModAssembly` 时，安卓上第二个 Mod 直接加载失败**（同一个 `AndroidAssemblyLoadLock`
+  `:149` 下排队，先到的赢）。
+* 还有第二条闸（`:316-324`）：程序集名与**当前 AppDomain 里任何已加载程序集**同名（`OrdinalIgnoreCase`）
+  也抛 ⇒ 名字**别撞游戏自己的**（`PlantsVsZombies` / `GodotSharp`）。
+* ⚠️ 允许复用同名的只有**私有依赖**，且要求 identity 与**字节 sha256 全同**（`:308-313`）——
+  **主程序集（`isMainAssembly: true`）一律必须唯一**，没有例外。
+
+**而 `mod.json` 必须**保持 `Runtime/ModAssembly.dll` —— 它是**字面量硬校验**（`ModLoader.cs:330`；另一处 `:918`
+还额外禁 `..`/根路径/`:`）：
+```csharp
+if (!string.IsNullOrWhiteSpace(text) && !text.Equals("Runtime/ModAssembly.dll", StringComparison.Ordinal))
+    throw new InvalidDataException("invalid declared runtime assembly path: " + text);
+```
+⇒ **变的是「程序集身份」，不是「包内文件路径」。** 容器里那个文件**永远叫 `ModAssembly.dll`**。
+
+**构建脚本要跟着改一行**（否则找不到产物；本项目 `build_runtime.py` 现状即为此）：
+```python
+ASSEMBLY_NAME = "SuperGatlingPaper"        # == csproj 的 <AssemblyName> == 本 Mod <Key>
+# 旧：src = os.path.join(out_dir, "ModAssembly.dll")   ← 会在改名后直接报「编译产物里没有 ModAssembly.dll」
+src = os.path.join(out_dir, ASSEMBLY_NAME + ".dll")     # 构建产物：<AssemblyName>.dll
+TARGET_DLL = os.path.join(MOD_DIR, "Runtime", "ModAssembly.dll")   # 装机名：**不变**
+```
+即 **`<AssemblyName>.dll`（`dotnet build` 产物）→ 复制并改名为 `ModAssembly.dll`（打进包）**。
+
+**改名是安全的（为什么不会连带改一堆东西）**：
+* 运行入口按 **`Type.FullName`** 匹配（`XWModCharacterCompanionRuntime.cs:105`）—— **与程序集名无关**；
+* `CompanionOnly` 伴随脚本按 **`type.Name`** 匹配（`:185-186`，名字取自 `mod_character_script_path` 的
+  文件名）—— 也**与程序集名无关**；
+* ⇒ 只需同步**构建脚本的产物名**；`mod.json`、场景 `script`、meta `mod_character_script_path`
+  **一律不动**。
+
+**自检三条（缺一不可）**：
+1. `grep -o '<AssemblyName>[^<]*</AssemblyName>' runtime_src_*/*.csproj`
+   ⇒ **一个 `ModAssembly` 都不许有**，且**两两不重复**；
+2. 装机后 `Runtime/` 下仍**只有一个** `ModAssembly.dll`（`ValidateDeclaredPackageExecutables`，
+   `ModLoader.cs:343-346`）；
+3. 读回程序集身份 == `<Key>`：
+   `AssemblyName.GetAssemblyName("<pmod 解包目录>/Runtime/ModAssembly.dll").Name`。
+
+> ⚠️ **本工坊现状（2026-09-28 实测）**：8 个 `runtime_src_*/*.csproj` **全部**写着
+> `<AssemblyName>ModAssembly</AssemblyName>` ⇒ **安卓上会互相顶掉**。补这一条时要连带把
+> csproj 与 `build_runtime.py` 一起改（改完 DLL 字节变 ⇒ **所有产物指纹都要重刷**）。
+
 ### 入口实现纪律
 - 三个回调 `Initialize(XWModRuntimeContext)` / `OnAllModsLoaded()` / `Shutdown()`
   **一律 try/catch、绝不抛**（抛 = 上面那条无条件回滚）。
@@ -1613,6 +1687,8 @@ insertLayerId = 16
   `Assets/Textures` 与 `Runtime/` **不在** 72 项里，但放进去不影响加载（只影响编辑器目录骨架）。
 - 编译：`dotnet build -c Release`；**csproj 必须 `<Compile Remove="check_*.cs" />`**，
   否则探针脚本（顶级语句）会被编进库 → CS8805。装机只放 `ModAssembly.dll`，**别带 `.pdb/.deps.json`**。
+  ⚠️ **csproj 还必须写 `<AssemblyName>【本 Mod 的 <Key>】</AssemblyName>`**（安卓要求主程序集名唯一），
+  构建脚本据此取产物 `<AssemblyName>.dll` 再改名为 `ModAssembly.dll` 装机 —— 见上一节「跨平台（安卓）程序集标识」。
 - ⚠️ **每条出错路径各用一个「已报告」标志，不要共用一个**（如 `_tickFaultReported` /
   `_almanacFaultReported` / `_hookFaultReported` / `_volleyFaultReported`）。
   共用时「先报的那条会把后报的静音掉」：图鉴归类失败（只是难看）会把「大招推进失败」
@@ -1757,6 +1833,8 @@ bool ok = (bool)sanitize.Invoke(null, new object[] { null, rel, abs, strip });
 
 **共享程序集做不到**：每个 `.pmod` 都必须自带路径**恰好**为 `Runtime/ModAssembly.dll` 的程序集，
 且两版 `runtimeEntryType` 不同（数字签名/类名都不同）⇒ 结构上没法共用一个 DLL。
+（注意：**包内文件名**都是 `ModAssembly.dll`，但两版的 **`<AssemblyName>` 程序集身份必须不同**
+—— 这正是安卓能容忍「同名文件」却容忍不了「同名程序集」的原因，见前面「跨平台（安卓）程序集标识」节。）
 
 **做法：共享源文件（single source of truth）**
 
