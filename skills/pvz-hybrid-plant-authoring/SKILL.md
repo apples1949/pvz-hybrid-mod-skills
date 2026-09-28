@@ -201,14 +201,38 @@ script = ExtResource("2")
     （`AdobeAnimateSpriteBase` + `flashAnimeData` + `Animation/Clip = "Idle"`）。
 * ⇒ **卡槽里显示的不是现成 PNG，而是同一套植物精灵按 `packetAnimeOffset/Scale` 摆放**。
   因此「换卡面」动的是**同一份资源，会同时影响卡槽与场上单位**——做外观类 Mod 必须先拍板这点。
-* ⇒ 想**离线取立绘**就必须能解开 `.dat`（图片都在里面，见上条）。
-  ⚠️ **第一步先检查解包到底有没有 `.dat`**：2026-09-28 实测一份"完整解包"
+* ⇒ 想**离线取立绘**就必须能拿到 `.dat`（图片都在里面，见上条）。
+  ⚠️ **第一步先检查手上的解包里有没有 `.dat`**：2026-09-28 实测一份"完整解包"
   （`植物大战僵尸杂交版V0.29`，根目录 551 项 + 完整 `Asset/` 树）里**一个 `.dat` 都没有**
-  （全盘仅 `icudt_godot.dat`，是 ICU 国际化数据，无关）。
-  这类解包能读 `.cs/.tres/.tscn/.json`，但**做不了离线取图**；取图只能走
-  「游戏内实例化 `<Key>.tscn` → `SubViewport` 渲染 → `GetImage()` 回读」
-  （上游 STS2 Mod 的 `PortraitGpuImageLoader` 就是这个套路，可照抄）。
-  同理：**这类解包也没有 `.dll/.exe/.pck/data_*`** ⇒ 不能编译插件、不能实机验证。
+  （全盘仅 `icudt_godot.dat`，是 ICU 国际化数据，无关）——**这类解包能读 `.cs/.tres/.tscn/.json`，
+  但取不到任何立绘**。遇到这种情况不要急着换方案，先按下面这条把 `.dat` 弄出来：
+* ★ **`.dat` 是可以用 GDRE 导出来的**（2026-09-28 更正，别被"GDRE 不支持 .dat"误导）：
+  `.dat` **不是 Godot 资源**，而是游戏用 `Godot.FileAccess.Open(path, Read)` **按路径直读的普通二进制文件**
+  （证据：`addons/AdobeAnimateEditor/Resource/AdobeAnimateData.cs:447` 是
+  `[Export(PropertyHint.File, "*.dat")] public string animeFile`，读取在 `:1035` / `:1293`）。
+  ⇒ GDRE **不解析它、但也无需解析**：`--extract` 是按 pck 文件表**原样写出**每个文件，
+  README 的 Limitations 只列了「2.x models / GDNative·GDExtension 脚本不支持转换」，
+  **没有"跳过未知文件"**这一条。
+  ⇒ 操作三步（GoDot RE Tools）：
+  ```bash
+  # ① 先确认在不在 pck 里（最省事，一条命令定案）
+  gdre_tools --headless --list-files="<游戏>.pck" > files.txt   # 再搜 .dat
+  # ② 在 ⇒ 只精确导出 .dat（--include 支持任意 glob）
+  gdre_tools --headless --extract="<游戏>.pck" --output=<DIR> --include="res://**/*.dat"
+  # ③ 不在 pck 里 ⇒ 它必然躺在 exe 同级的外部资源目录（res:// 也可映射到目录）
+  #    <本体>/data_*/Asset/Anime/Character/<类>/<章>/<Key>/<Key>.dat
+  ```
+  即：**解包缺 `.dat` ⇒ 说明那份解包不是 GDRE 全量 extract 的产物**（多半只解了脚本/资源子集），
+  重新按上面导一次即可，不必牺牲离线工具链。
+  拿到 `.dat` 后还原 Idle 首帧所需的一切都在 `<Key>.tres` 里：
+  `mediaRects`（图集矩形）+ `sliceMediaIds/sliceLayerIds/sliceTransforms/sliceAlpha` +
+  `clips.Idle`（帧区间）+ `mediaDictionary`（媒体名→id）。
+  本工坊已有 `.dat` 读写与"假渲染"逐 slice 合成的现成脚本，可直接复用。
+  ✅ 顺带：`XWModProjectLayout.cs:306` 把 `<Key>.dat` 当**角色包依赖**豁免 ⇒ **Mod 包内可以自带 `.dat`**。
+* **兜底路线**（确实拿不到 `.dat` 时）：游戏内实例化 `<Key>.tscn` → `SubViewport` 渲染 →
+  `GetImage()` 回读（上游 STS2 Mod 的 `PortraitGpuImageLoader` 就是这个套路，可照抄）。
+* ⚠️ 另注意：**只解了源码/资源的解包也没有 `.dll/.exe/.pck/data_*`** ⇒ 不能编译插件、不能实机验证，
+  开发前先确认手上有没有**游戏本体**（dll + pck）。
 * **图片替换的正规入口**：`<Key>.tscn` 里逐媒体列着
   `Animation/MediaReplace/<媒体名>.png = null` 槽位（如 `.../CactusBlover_head.png`）。
   比"改节点 `Texture`"规矩，但**是逐媒体替换**（一个植物十几个图层），批量做不现实。
