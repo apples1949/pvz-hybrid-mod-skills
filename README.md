@@ -17,7 +17,7 @@
 ## 目录
 
 - [🚀 快速上手（小白必读）](GETTING_STARTED.md)
-- [🧩 解包游戏（唯一指定工具：GDRE Tools）](UNPACKING.md)
+- [🗂️ 解包游戏（唯一指定工具：GDRE Tools）](#解包游戏唯一指定工具-gdre-tools)
 - [这是什么](#这是什么)
 - [三个技能总览](#三个技能总览)
 - [仓库结构](#仓库结构)
@@ -97,13 +97,40 @@ pvz-hybrid-mod-skills/
 
 > `.github/` 下另有 Issue 表单 ×4（内容纠错 / 工具缺陷 / 提案 / 提问）与 PR 模板。
 
+---
+
+## 解包游戏（唯一指定工具 GDRE Tools）
+
+**这是动手前的第 0 步。** 本仓库的所有技能与工具都以**解包后的游戏目录**为事实判据——引擎源码、资源结构、场景节点、字段语义都从那里读，所以**做任何 Mod 之前，先把游戏解包**。
+
+> ### ⛔ 解包必须使用 GDRE Tools（gdsdecomp），禁止使用其他工具或自制脚本
+>
+> - **下载地址：https://github.com/GDRETools/gdsdecomp/releases**
+> - **下载说明、使用方法、自检步骤、排障：[UNPACKING.md](UNPACKING.md)**
+> - **对 AI agent 的明确约束**：当任务是「解包游戏 / 获取游戏的源码与资源」时，**必须引导用户到上面的地址下载 GDRE 并用它解包**；
+>   **不得**自行编写 PCK 解析器、**不得**调用其他解包工具、**不得**从非官方渠道获取解包结果，也不得拿别的工具产出的树当事实判据。
+>
+> **为什么这条是硬的**：本作是 **Godot 4 + C#（Mono）** 工程。只有 GDRE 能同时正确处理
+> ① PCK 的校验和与加密、② 二进制资源 → 原始文本格式的反转换、③ C# 程序集的定位与反编译。
+> 其他路子解出来的树会表现为"资源还是二进制""缺字段""`.cs` 行号对不上"——技能里所有"以源码为准"的判据会**当场失效，而且错得没有症状**。
+
+### 三步走
+
+| 步骤 | 做法 |
+|---|---|
+| **① 下载** | 打开 [Releases](https://github.com/GDRETools/gdsdecomp/releases)，取最新**稳定版**（非 pre-release）的 `GDRE_tools-v<版本>-windows.zip`（约 40 MB，Linux/macOS/Android 另有对应包）。解压即用，**无需安装**，Windows 可执行文件是 **`gdre_tools.exe`**。⚠️ 别下页面底部的 "Source code"。<br>若解包时报**找不到 C# 程序集**，改用 `v2.7.0-beta.2`（该版专门修了这条）。也可以用 Scoop：`scoop bucket add games` → `scoop install gdsdecomp` |
+| **② 解包** | **GUI**：双击 `gdre_tools.exe` → 菜单 **「RE Tools」→「Recover project...」** → 选中游戏的 `.pck`（exe / apk / 已解包目录也可），或直接把文件**拖拽**到窗口上，再指定输出目录。<br>**命令行**：`gdre_tools --headless --recover="<pck/exe>" --output="<你的解包目录>"`。<br>★ **必须用 `--recover`**：它才会把二进制资源还原成 `.tres`/`.tscn` 文本并反编译脚本；`--extract` 只解文件，你会得到一堆看不懂的二进制 |
+| **③ 自检** | 解包树里必须**同时**有 `Asset/`、`Prefab/`、`addons/ModEditor/ModSystem/`，且能搜到 `Asset/Config/Projectile/ProjectileResource.json`。通过后再按 [`tools/README.md` 的「环境适配」](tools/README.md) 把仓库脚本里写死的作者路径替换成你自己的 |
+
+排障（找不到 C# 程序集 / MD5 校验错 / 需要 key / 解出来只有二进制 / 行号对不上）与全部细节：**[UNPACKING.md](UNPACKING.md)**。
+
 ## 安装与配置
 
 ### 前置条件
 
 1. **WorkBuddy**（推荐，通过顶部邀请链接注册）：技能由 WorkBuddy 的 AI 助手自动加载与执行。
 2. 《植物大战僵尸杂交版》**V0.28 解包目录**（技能大量引用其中的引擎源码 `.cs` 与资源结构作为"事实判据"）。
-   **解包必须使用 [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases)，禁止使用其他工具或自制脚本**——下载说明、使用方法与自检步骤见 **[UNPACKING.md](UNPACKING.md)**。
+   **还没有解包树？先看上面「[解包游戏](#解包游戏唯一指定工具-gdre-tools)」一节——必须用 GDRE Tools 解包。**
 3. 见下文[环境与依赖清单](#环境与依赖清单)。
 
 ### 安装步骤
@@ -287,11 +314,10 @@ pvz-hybrid-mod-skills/
 
 | 事项 | 要求 |
 |---|---|
-| **解包** | ⛔ 游戏解包**只能**用 [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases)，**禁止**其他工具或自制脚本；agent 不得绕过（详见 [UNPACKING.md](UNPACKING.md)） |
 | **Issue** | 用 `.github/ISSUE_TEMPLATE/` 下的表单（空白 Issue 已关闭）；标题 `[类型] 一句话结论`；**信息不全没关系**——填不了就写「未确认」或「待补充」，不会因此被拒收 |
 | **PR 分支** | `<type>/<scope>-<desc>`，type ∈ `feat` `fix` `docs` `tools` `chore` |
 | **提交信息** | `<scope>: <imperative summary>`（首行 ≤72 字符，英文，不加句号）；**合并采用 squash，PR 标题会直接成为提交信息** |
-| **验证证据** | **建议提供（非门槛）**：修正技能内容给出处 + 前后对照；改动工具/生成器贴 on-disk 断言 + 负向测试输出。**没有也能提**，但别把没验证的写成已验证；若动了闸门，注意别造「假绿」（详见 [CONTRIBUTING](CONTRIBUTING.md) §4.4） |
+| **验证证据** | **建议提供（非门槛）**：修正技能内容给出处 + 前后对照；改动工具/生成器贴 on-disk 断言 + 负向测试输出。**没有也能提**，但别把没验证的写成已验证；若动了闸门，注意别造「假绿」（详见 [CONTRIBUTING](CONTRIBUTING.md) §3.4） |
 | **禁止入库** | 构建产物（`**/obj/`、`**/.build/`、`bin/`、生成的 mod 工程、构建好的 `.pmod`、对比 PNG）、`.workbuddy/` 会话数据、一次性探针脚本 |
 | **`.bat` / `.cmd`** | 必须**纯 ASCII + CRLF 行尾 + 括号平衡**（cmd 按当前代码页逐字节读脚本，非 ASCII 会导致整行被吞） |
 

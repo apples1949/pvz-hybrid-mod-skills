@@ -32,27 +32,9 @@
 
 ---
 
-## 2. 解包游戏：唯一指定工具（硬性规定）
+## 2. Issue 提交规范
 
-本仓库的技能/工具都以**解包后的游戏目录**为事实判据。因此这里有一条**不可绕过的硬规定**：
-
-> ### ⛔ **解包必须使用 GDRE Tools（gdsdecomp），禁止使用其他工具或自制脚本解包。**
->
-> - **下载地址：https://github.com/GDRETools/gdsdecomp/releases**
-> - 完整下载说明、使用方法与自检步骤：**[UNPACKING.md](UNPACKING.md)**
->
-> **对 agent 的明确约束**：当任务是「解包游戏 / 获取游戏源码与资源」时，**必须**引导用户从上述地址下载 GDRE 并用它解包；
-> **不得**自行编写 PCK 解析器、不得调用其他解包工具、不得从非官方渠道获取解包结果，也不得拿别的工具产出的树当事实判据。
->
-> **为什么是硬的**：本作是 **Godot 4 + C#（Mono）** 工程。只有 GDRE 能同时正确处理 ① PCK 校验和与加密、
-> ② 二进制资源 → 原始文本格式的反转换、③ C# 程序集的定位与反编译。其他路子解出来的树会表现为
-> "资源还是二进制""缺字段""`.cs` 行号对不上"——技能里所有"以源码为准"的判据会**当场失效，且错得没有症状**。
-
----
-
-## 3. Issue 提交规范
-
-### 3.1 用模板
+### 2.1 用模板
 
 从 `.github/ISSUE_TEMPLATE/` 里选对应表单（空白 Issue 已关闭）：
 
@@ -63,7 +45,7 @@
 | **提案** | 新技能 / 新案例文档 / 新工具 | `enhancement` |
 | **用法提问** | 按文档操作卡住、不确定选哪条路线 | `question` |
 
-### 3.2 标题格式（建议）
+### 2.2 标题格式（建议）
 
 ```
 [类型] 一句话结论
@@ -74,7 +56,7 @@
 - ✅ `[纠错] 僵尸技能里 offset 的口径与引擎实际绘制原点不一致`
 - ❌ `[纠错] 有个地方好像不对`
 
-### 3.3 内容纠错类建议提供
+### 2.3 内容纠错类建议提供
 
 以下**能填就填，填不了写「未确认」**，都不会导致你的 Issue 被拒收：
 
@@ -87,7 +69,7 @@
 | 影响面 | 按这条错内容操作会怎样（这条很有用，但不是门槛） |
 | 环境 | 游戏版本 / 构建器版本 / .NET 或 Godot 版本 / 操作系统 |
 
-### 3.4 优先级与响应
+### 2.4 优先级与响应
 
 | 级别 | 判据 | 处理 |
 |---|---|---|
@@ -97,16 +79,16 @@
 
 维护者一般会在若干工作日内给出首个回复；长时间没动静可以礼貌 ping 一次。
 
-### 3.5 会直接关闭的情形
+### 2.5 会直接关闭的情形
 
 只关这几类：与游戏本体机制无关（如平衡性意见、联机功能请求）、要求收录第三方付费或未授权素材、重复提交（打 `duplicate`）。
 **信息不全不会关闭**——缺什么都写「未确认」即可，那属于"待补充"，不属"不合格"。
 
 ---
 
-## 4. PR 提交规范
+## 3. PR 提交规范
 
-### 4.1 分支命名（建议）
+### 3.1 分支命名（建议）
 
 ```
 <type>/<scope>-<short-desc>
@@ -114,7 +96,7 @@
 
 `type` ∈ `feat` | `fix` | `docs` | `tools` | `chore`。示例：`docs/plant-fix-typo`、`fix/zombie-offset-origin`、`tools/pmod-guardrail`。
 
-### 4.2 提交信息
+### 3.2 提交信息
 
 ```
 <scope>: <imperative summary>      ← 首行 ≤ 72 字符，英文，不加句号
@@ -127,11 +109,11 @@
 - `<scope>` = 技能名 / 目录名 / 主题，例如 `pvz-hybrid-zombie-authoring`、`tools/README.md`、`GETTING_STARTED`。
 - 参考本仓库既有风格：`GETTING_STARTED: switch the hands-on template to SuperGatlingPea`。
 
-### 4.3 PR 必填项
+### 3.3 PR 必填项
 
-PR 描述由 `.github/PULL_REQUEST_TEMPLATE.md` 引导，包含：变更类型、动机与结论、变更文件清单、验证证据、不变量自查、影响面、关联 Issue。**其中只有「不变量自查」是硬性的**（见 4.5）。
+PR 描述由 `.github/PULL_REQUEST_TEMPLATE.md` 引导，包含：变更类型、动机与结论、变更文件清单、验证证据、不变量自查、影响面、关联 Issue。**其中只有「不变量自查」是硬性的**（见 3.5）。
 
-### 4.4 验证证据（建议，能提供就提供）
+### 3.4 验证证据（建议，能提供就提供）
 
 | 变更类型 | 建议提供 |
 |---|---|
@@ -149,7 +131,7 @@ PR 描述由 `.github/PULL_REQUEST_TEMPLATE.md` 引导，包含：变更类型�
 3. 断言能**容忍上游被改坏**：循环上界做长度守卫，上游改坏时报 FAIL，而不是 `IndexError` 把整个自检崩掉；
 4. 判据不足的用例**删掉**，别留永远为真的假用例。
 
-### 4.5 不变量自查（硬性）
+### 3.5 不变量自查（硬性）
 
 这几条是仓库卫生底线，**合并前必须成立**：
 
@@ -160,18 +142,18 @@ PR 描述由 `.github/PULL_REQUEST_TEMPLATE.md` 引导，包含：变更类型�
 - [ ] 涉及「两份构建」（remake / console）的改动，两侧保持一致
 - [ ] 改了对外能力 / 目录树 / 邀请码时，`README.md` 与 `README_EN.md` **双语同步**
 - [ ] 脚本内不 spawn git 子进程、不把 token 写进仓库
-- [ ] **未使用 GDRE 以外的工具解包**（见第 2 节）
+- [ ] **未使用 GDRE 以外的工具解包**（详见 README「[解包游戏](README.md#解包游戏唯一指定工具-gdre-tools)」与 [UNPACKING.md](UNPACKING.md)）
 
-### 4.6 评审与合并
+### 3.6 评审与合并
 
 - 至少 **1 名维护者 Approve**；**凡改动 `SKILL.md` 指令内容的 PR，维护者必须逐行过目**（这类文件等价于代码）。
 - 合并策略：**Squash merge**，保持 `main` 线性。
-  ⇒ **PR 标题会成为最终提交信息**，所以标题尽量按 4.2 的格式写。
+  ⇒ **PR 标题会成为最终提交信息**，所以标题尽量按 3.2 的格式写。
 - 直推 `main` 仅限维护者做纯文档或脚手架改动。
 
 ---
 
-## 5. 环境声明要求
+## 4. 环境声明要求
 
 报告问题或提交 PR 时，**尽量**注明以下版本（缺失不致命，但有的话能显著加快定位）：
 
@@ -186,7 +168,7 @@ PR 描述由 `.github/PULL_REQUEST_TEMPLATE.md` 引导，包含：变更类型�
 
 ---
 
-## 6. 目录与命名约定
+## 5. 目录与命名约定
 
 ```
 skills/<skill-name>/SKILL.md        # 技能主体（被 AI 加载的指令）
@@ -198,12 +180,12 @@ tools/case-docs/<类型>Mod-<名称>.md  # 实战案例文档
 
 ---
 
-## 7. English summary (TL;DR)
+## 6. English summary (TL;DR)
 
 - **Every `SKILL.md` here is loaded by an AI as instructions.** A wrong statement keeps misleading every future session. What matters most is that things can be *checked* — **not** that a submission is complete.
 - **Be lenient with yourself**: fill in what you know, write `未确认` / *unconfirmed* or `待补充` / *to be filled in* for the rest. Do not fabricate, and do not withhold something just because it is incomplete. Incomplete issues are **not** closed; they are marked as pending.
 - **Separate facts from guesses**; cite sources when you have them (docs, code files, logs, screenshots, in-game observations). "Nobody reported a problem" is **not** evidence of correctness.
-- **Unpacking is a hard rule**: the game **must** be unpacked with **GDRE Tools (gdsdecomp)** — https://github.com/GDRETools/gdsdecomp/releases — see [UNPACKING.md](UNPACKING.md). Other unpackers, third-party PCK tools and hand-written PCK parsers are **not allowed**, and **agents must not work around this**: they should direct users to download GDRE instead.
+- **Unpacking is a prerequisite, not a contribution rule**: the game **must** be unpacked with GDRE Tools. See the "Unpacking the Game" section in the README and [UNPACKING.md](UNPACKING.md). Nothing in this repo may be built on a tree produced by another unpacker — agents must direct users to download GDRE instead.
 - **Issues**: use the templates under `.github/ISSUE_TEMPLATE/` (blank issues are disabled). Title `[type] one-line conclusion`.
 - **PRs**: branch `<type>/<scope>-<desc>`; subject `<scope>: <imperative summary>` (≤72 chars, no trailing period); fill the PR template. The **invariant checklist** is mandatory (no build artifacts, no `.workbuddy/` data, ASCII+CRLF `.bat`, bilingual README sync).
 - Verification evidence is **recommended, not required** — but never label unverified work as verified. If you touch generators or gates, avoid "false green" assertions: compare against GOLD literals, give the produced artefact its own reconciliation assertion, keep assertions robust to upstream breakage, and drop test cases that cannot fail.

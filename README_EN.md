@@ -19,7 +19,7 @@ A **WorkBuddy Agent Skills** collection for modding *Plants vs. Zombies Hybrid E
 ## Table of Contents
 
 - [🚀 Quick Start (for beginners)](GETTING_STARTED.md)
-- [🧩 Unpacking the game (mandatory tool: GDRE Tools)](UNPACKING.md)
+- [🗂️ Unpacking the Game (mandatory tool: GDRE Tools)](#unpacking-the-game-mandatory-tool-gdre-tools)
 - [What Is This](#what-is-this)
 - [The Three Skills at a Glance](#the-three-skills-at-a-glance)
 - [Repository Layout](#repository-layout)
@@ -98,13 +98,40 @@ pvz-hybrid-mod-skills/
 
 > `.github/` also hosts four issue forms (content error / tool bug / feature request / question) and a PR template.
 
+---
+
+## Unpacking the Game (mandatory tool: GDRE Tools)
+
+**This is step 0, before anything else.** Every skill and tool in this repo takes an **unpacked game tree** as ground truth — engine source, resource structure, scene nodes and field semantics are all read from it. So **unpack the game before writing any mod**.
+
+> ### ⛔ The game must be unpacked with GDRE Tools (gdsdecomp); other tools and hand-written scripts are not allowed
+>
+> - **Download: https://github.com/GDRETools/gdsdecomp/releases**
+> - **Download notes, usage, self-check and troubleshooting: [UNPACKING.md](UNPACKING.md)** (Chinese)
+> - **Explicit constraint for AI agents**: when the task is "unpack the game / obtain its source and assets", the agent **must direct the user to download GDRE from the link above and unpack with it**. It **must not** write its own PCK parser, **must not** call another unpacking tool, and **must not** use a tree produced by anything else as ground truth.
+>
+> **Why this is hard**: this title is a **Godot 4 + C# (Mono)** project. Only GDRE correctly handles
+> ① PCK checksums and encryption, ② binary resources → original text formats, ③ C# assembly resolution and decompilation.
+> Trees produced any other way show up as "resources still binary", "missing fields", "`.cs` line numbers don't match" —
+> every "source is the arbiter" claim in the skills **silently becomes wrong**.
+
+### Three steps
+
+| Step | What to do |
+|---|---|
+| **① Download** | Open [Releases](https://github.com/GDRETools/gdsdecomp/releases) and grab the latest **stable** (non pre-release) `GDRE_tools-v<ver>-windows.zip` (~40 MB; Linux/macOS/Android builds available). Unzip and run — **no install needed**; the Windows binary is **`gdre_tools.exe`**. ⚠️ Do not download the "Source code" archives. <br>If unpacking reports a missing **C# assembly**, use `v2.7.0-beta.2`, which fixes exactly that. Scoop users: `scoop bucket add games` → `scoop install gdsdecomp` |
+| **② Unpack** | **GUI**: launch `gdre_tools.exe` → menu **"RE Tools" → "Recover project..."** → pick the game's `.pck` (`.exe` / `.apk` / an already-extracted dir also work), or just **drag and drop** the file onto the window; then choose an output directory. <br>**CLI**: `gdre_tools --headless --recover="<pck/exe>" --output="<your dir>"`. <br>★ **`--recover` is required** — only it converts binary resources back to `.tres`/`.tscn` text and decompiles scripts. `--extract` merely dumps files, leaving you with unreadable binaries |
+| **③ Self-check** | The tree must contain **all three** of `Asset/`, `Prefab/`, `addons/ModEditor/ModSystem/`, and must contain `Asset/Config/Projectile/ProjectileResource.json`. Once it passes, do the "environment adaptation" in [`tools/README.md`](tools/README.md) and replace the author's hardcoded paths with your own |
+
+Troubleshooting (missing C# assembly / MD5 errors / encryption key / binary-only output / mismatched line numbers) and all details: **[UNPACKING.md](UNPACKING.md)**.
+
 ## Installation & Configuration
 
 ### Prerequisites
 
 1. **WorkBuddy** (recommended — register via the invitation link at the top): skills are auto-loaded and executed by the WorkBuddy AI agent.
 2. An unpacked copy of *PvZ Hybrid Edition* **V0.28** (the skills constantly consult engine source `.cs` files and the `Asset/` structure as ground truth).
-   Unpacking **must** be done with [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases) — other tools and hand-written scripts are **not allowed**. See **[UNPACKING.md](UNPACKING.md)** for download and usage.
+   **No unpacked tree yet? See "[Unpacking the Game](#unpacking-the-game-mandatory-tool-gdre-tools)" above — it must be unpacked with GDRE Tools.**
 3. See [Environment & Dependencies](#environment--dependencies).
 
 ### Steps
@@ -289,11 +316,10 @@ Full guidelines: **[CONTRIBUTING.md](CONTRIBUTING.md)** (Chinese, with an Englis
 
 | Topic | Requirement |
 |---|---|
-| **Unpacking** | ⛔ The game **must** be unpacked with [GDRE Tools](https://github.com/GDRETools/gdsdecomp/releases); other tools and hand-written scripts are banned, and agents must not work around this ([UNPACKING.md](UNPACKING.md)). |
 | **Issues** | Use the forms under `.github/ISSUE_TEMPLATE/` (blank issues are disabled). Title: `[type] one-line conclusion`. **Incomplete is fine** — write `未确认` / *unconfirmed* or `待补充` / *to be filled in*; incomplete issues are not closed. |
 | **PR branch** | `<type>/<scope>-<desc>`, type ∈ `feat` `fix` `docs` `tools` `chore` |
 | **Commit subject** | `<scope>: <imperative summary>` (≤72 chars, English, no trailing period). **Merging is squash-only, so the PR title becomes the commit subject.** |
-| **Verification** | **Recommended, not required**: skill-content fixes benefit from a before/after comparison, tool/generator changes from **on-disk assertions + negative tests** output. Never label unverified work as verified, and avoid "false green" assertions if you touch gates ([CONTRIBUTING](CONTRIBUTING.md) §4.4). |
+| **Verification** | **Recommended, not required**: skill-content fixes benefit from a before/after comparison, tool/generator changes from **on-disk assertions + negative tests** output. Never label unverified work as verified, and avoid "false green" assertions if you touch gates ([CONTRIBUTING](CONTRIBUTING.md) §3.4). |
 | **Never commit** | Build artifacts (`**/obj/`, `**/.build/`, `bin/`, generated mod projects, built `.pmod`, diff PNGs), `.workbuddy/` session data, one-off probe scripts. |
 | **`.bat` / `.cmd`** | Must be **ASCII-only with CRLF line endings and balanced parentheses** (cmd reads batch files byte-by-byte in the current code page; non-ASCII silently eats whole lines). |
 
