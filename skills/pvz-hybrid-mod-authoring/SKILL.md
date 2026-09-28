@@ -1570,6 +1570,39 @@ insertLayerId = 16
 - `GeneralPlant.Category` 实测只有 6 个键：White178/Gold19/Diamond16/Colour6/Star27/Original20
   （Item/GraveStone/Zombie 在别的卡库）—— 别照 `XWPacketBankVisualResourceEditor.DefaultCategories` 猜。
 
+**★ 与「卡 key 入库」互补的另一条路：运行期「把卡塞进玩家卡槽」（2026-09-28 源码实测）**
+
+想在一局**战斗进行中**白给玩家一张卡，别去动卡库，直接调公开 API：
+
+```csharp
+TowerDefensePacketOverride ov = new TowerDefensePacketOverride();
+ov.cost = 0;                                              // 可改费用 ⇒ 能造"免费卡"
+TowerDefenseManager.Instance.AddPacket("<卡key>", ov);     // 内部：GetSeedBank().AddPacket(config, isStart: true)
+```
+
+* 实现：`Core/TowerDefenseManager/TowerDefenseManager.cs:2810-2826`（`config._override = override_` + `seedBank.AddPacket`）；
+* 先例：`TowerDefensePlantLuckyBlover.Explode()`（钻石幸运四叶草，爆炸时批量给玩家卡）——
+  它同时演示了 `item.Cover(packetConfig, override, keepColddown: false, changePacket: false)` 改已有卡槽 + `item.coldDownTimer = config.GetStartingCooldown()`；
+* 相关读数：`GetSeedBankList()`（`:2828-2836`）、`GetPacketSlotNum()`（`:2795-2808`）、`TowerDefenseManager.Instance.seedbankPacketMax`（卡槽上限）；
+* ⚠️ **有上限 + 会重复**：满槽时先 `Cover()` 覆盖一张再 `AddPacket()`；同一 key 已存在时自己判重，别硬塞；
+* **数据层等价物**：`TowerDefenseCharacterEventCreateAddPacket`
+  （`Resource/TowerDefense/Character/Event/Packet/TowerDefenseCharacterEventCreateAddPacket.cs`，
+  全类只有一个 `[Export] public string packetName`）⇒ 动画事件表里就能配"加卡"，不一定写代码。
+
+**★ 托管插件可订阅的全局事件（`Core/BattleEventBus/BattleEventBus.cs`）**
+
+`BattleEventBus.Instance` 是单例 Node（`PVZApiRegistry.RegisterClass("BattleEventBus", …)` 已注册，托管插件可反射取）。事件清单：
+
+`OnCharacterSpawned` / `OnCharacterDestroy` / `OnCharacterHurt` / `OnColdEffectEmit` / `OnBlowAllEffectEmit` /
+`OnBlowLineEffectEmit` / `OnJalaLineEffectEmit` / `OnJalaRowEffectEmit` / `OnJalaGridEffectEmit` / `OnGameStarted` /
+`OnGameFailed` / `OnGameVictory` / `OnGamePaused(bool)` / `OnWaveStarted(int)` / `OnUiSwitched(bool)` /
+`OnCharacterSkinSwitched` / `OnPacketUIFront(bool)` / `OnShowPlantHealth` / `OnShowZombieHealth` /
+`OnShowBossHealthBar` / `OnScreenTransformChanged`
+
+⇒ **要挂"某个植物/僵尸被生成"就盯 `OnCharacterSpawned`**（比自己每帧扫注册表轻）；回调拿到的是
+`TowerDefenseCharacter`，要自己判 `is TowerDefensePlant`、`packet.saveKey`、`camp` 与格位。
+⇒ **弹自定义全屏 UI 时可参考 `OnGamePaused` / `OnUiSwitched` / `OnPacketUIFront` 的语义**做暂停与让位。
+
 **④ 换掉「投掷车僵尸投出来的单位」**（已实测）：
 `TowerDefenseZombieImppult.ImpSpawn()`（`…/Chapter5/Imppult/Scene/TowerDefenseZombieImppult.cs:135`）
 **硬编码** `GetPacketConfig("ZombieImp")`；`projectileName` 只是美术层名字 ⇒ 只有插件一条路。
