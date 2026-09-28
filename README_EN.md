@@ -31,6 +31,7 @@ A **WorkBuddy Agent Skills** collection for modding *Plants vs. Zombies Hybrid E
 - [Standard Workflow (How the Skills Fit Together)](#standard-workflow-how-the-skills-fit-together)
 - [Important Notes](#important-notes)
 - [FAQ](#faq)
+- [Contributing (Issue / PR guidelines)](CONTRIBUTING.md)
 - [License](#license)
 
 ---
@@ -271,6 +272,24 @@ No. Write the Chinese name directly in the `translate` field; `translations.csv`
 They are plain Markdown (frontmatter + body), so the content is portable; the "auto-trigger by description, auto-run gates" experience depends on WorkBuddy. Any AI tool with custom system prompts / knowledge bases can consume them manually.
 
 ---
+
+## Contributing (Issue / PR guidelines)
+
+> **⚠️ Every `SKILL.md` in this repo is loaded by an AI as instructions.** A single wrong statement keeps
+> misleading every future session — so this repository demands evidence, not impressions.
+
+Full guidelines: **[CONTRIBUTING.md](CONTRIBUTING.md)** (Chinese, with an English TL;DR). Key points:
+
+| Topic | Requirement |
+|---|---|
+| **Issues** | Use the forms under `.github/ISSUE_TEMPLATE/` (blank issues are disabled). Title: `[type] one-line conclusion`. Verifiable evidence is mandatory (code file + line number / in-game observation / log excerpt) — "I remember" and "it should be" are not accepted. |
+| **PR branch** | `<type>/<scope>-<desc>`, type ∈ `feat` `fix` `docs` `tools` `chore` |
+| **Commit subject** | `<scope>: <imperative summary>` (≤72 chars, English, no trailing period). **Merging is squash-only, so the PR title becomes the commit subject.** |
+| **Verification** | Skill-content fixes need a before/after comparison; tool/generator changes need **on-disk assertions + negative tests** output. **"False green" verification is rejected** — assert against GOLD literals and give the produced artefact its own reconciliation assertion. |
+| **Never commit** | Build artifacts (`**/obj/`, `**/.build/`, `bin/`, generated mod projects, built `.pmod`, diff PNGs), `.workbuddy/` session data, one-off probe scripts. |
+| **`.bat` / `.cmd`** | Must be **ASCII-only with CRLF line endings and balanced parentheses** (cmd reads batch files byte-by-byte in the current code page; non-ASCII silently eats whole lines). |
+
+Quick links: [report content error](https://github.com/josnil/pvz-hybrid-mod-skills/issues/new?template=content-correction.yml) · [report tool bug](https://github.com/josnil/pvz-hybrid-mod-skills/issues/new?template=tool-bug.yml) · [propose a feature](https://github.com/josnil/pvz-hybrid-mod-skills/issues/new?template=feature-request.yml) · [ask a question](https://github.com/josnil/pvz-hybrid-mod-skills/issues/new?template=question.yml)
 
 ## License
 

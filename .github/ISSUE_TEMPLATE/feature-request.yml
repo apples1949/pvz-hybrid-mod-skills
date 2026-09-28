@@ -1,0 +1,73 @@
+name: 提案（新技能 / 新案例 / 新工具）
+description: 希望仓库收录新的技能、实战案例文档或工具
+title: "[提案] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提案请聚焦「**解决什么真实问题**」与「**能否被验证**」。
+        本仓库优先收录**已在真实 Mod 项目里跑通**的流程，纯设想类提案可能被挂起。
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 提案类型
+      options:
+        - 新技能（新的 SKILL.md，覆盖一类此前没有的 Mod 工作）
+        - 新实战案例文档（tools/case-docs/）
+        - 新工具或生成器（tools/）
+        - 现有技能的扩展（补充章节 / 新增判据）
+        - 文档改进（含 README_EN 翻译同步）
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决什么问题
+      description: 现状下你会卡在哪一步？现在的做法为什么不够好？
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 期望的形态与产物
+      description: 期望新增/修改哪些文件？大致内容结构？期望的验收方式？
+    validations:
+      required: true
+
+  - type: textarea
+    id: verified
+    attributes:
+      label: 你已有的验证 / 素材（可选但强烈建议）
+      description: 是否已经自己跑通？有没有可复用的脚本、截图、日志、金标数据？
+    validations:
+      required: false
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 边界说明
+      description: 哪些是**不**打算做的？是否依赖游戏本体改动、官方构建器 exe 或未授权素材？
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: offer
+    attributes:
+      label: 参与意愿
+      options:
+        - label: 我愿意自己提交 PR 实现这个提案
+          required: false
+
+  - type: checkboxes
+    id: precheck
+    attributes:
+      label: 提交前自查
+      options:
+        - label: 我已阅读 CONTRIBUTING.md，且本 Issue 只讲一件事
+          required: true
+        - label: 我已搜索过现有 Issue / PR，确认不是重复提案
+          required: true

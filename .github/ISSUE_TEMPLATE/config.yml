@@ -1,0 +1,15 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 新手入门（先看这个）
+    url: https://github.com/josnil/pvz-hybrid-mod-skills/blob/main/GETTING_STARTED.md
+    about: 30 分钟做出第一个 Mod 的快速上手，含零解包路线与报错对照表。
+  - name: 技能与工具总览
+    url: https://github.com/josnil/pvz-hybrid-mod-skills/blob/main/README.md
+    about: 三个技能、工具链、案例文档的索引与适用范围。
+  - name: 贡献规范（Issue / PR 怎么写）
+    url: https://github.com/josnil/pvz-hybrid-mod-skills/blob/main/CONTRIBUTING.md
+    about: 提交前的必读项：标题格式、必填证据、不变量自查。
+  - name: 工具环境适配与逐文件用法
+    url: https://github.com/josnil/pvz-hybrid-mod-skills/blob/main/tools/README.md
+    about: 路径适配、依赖要求、各脚本用途说明。

@@ -1,0 +1,96 @@
+name: 内容纠错（技能 / 文档有错）
+description: 技能或文档里的结论、口径、命令、行号、判据与实际不符
+title: "[纠错] "
+labels: ["bug", "documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢纠错！
+
+        > ⚠️ 本仓库的 `SKILL.md` 会被 AI 直接当作指令加载，**一条错的结论会持续误导后续所有会话**，
+        > 所以请尽量给出可被第三方独立复现的证据。
+
+        提交前请确认：① 已阅读 `CONTRIBUTING.md` 的第 1、2 节；② **一个 Issue 只讲一件事**。
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: 涉及哪个文件
+      options:
+        - skills/pvz-hybrid-mod-authoring/SKILL.md（通用 .pmod / 打包 / 托管插件）
+        - skills/pvz-hybrid-plant-authoring/SKILL.md（植物）
+        - skills/pvz-hybrid-zombie-authoring/SKILL.md（僵尸）
+        - skills/*/references/*（参考资料）
+        - tools/（生成器 / 工具链 / 闸门）
+        - tools/case-docs/（实战案例文档）
+        - README.md / README_EN.md / GETTING_STARTED.md
+        - 其他（请在「具体位置」中说明）
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: 具体位置
+      description: 章节标题 / 行号 / 可搜索的关键词，便于快速定位
+      placeholder: 例：§「外观三件套」第 3 条；或 SKILL.md 第 1820 行
+    validations:
+      required: true
+
+  - type: textarea
+    id: quote
+    attributes:
+      label: 原文摘录
+      description: 直接粘贴有问题的那段原文，不要转述
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 为什么是错的（证据）
+      description: 可验证来源：代码文件+行号 / 游戏内实测 / 日志片段 / 官方行为。不接受「我记得」「应该是」
+      placeholder: |
+        例：TowerDefenseManager.cs:520 的 `if (!item.characterFilter)` 表明……
+        例：游戏 V0.28 实测，在 XX 条件下出现 YY 现象，日志片段见下
+    validations:
+      required: true
+
+  - type: textarea
+    id: correct
+    attributes:
+      label: 正确做法 / 建议改法
+      description: 你已验证的正确结论，或建议的措辞
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响面
+      description: 按这条错内容操作会导致什么后果（浪费时间 / 流程跑不通 / 崩游戏 / 损坏存档……）
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      description: 游戏版本 / 构建器版本 / .NET 或 Godot 版本 / 操作系统
+      placeholder: 游戏 V0.28；构建器 v0.28；.NET 9；Windows 11
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: precheck
+    attributes:
+      label: 提交前自查
+      options:
+        - label: 我已阅读 CONTRIBUTING.md 的 Issue 规范
+          required: true
+        - label: 本 Issue 只讲一件事
+          required: true
+        - label: 我给出的证据可被第三方独立复现
+          required: true

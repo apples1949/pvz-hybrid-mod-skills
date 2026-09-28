@@ -29,6 +29,7 @@
 - [标准工作流（三技能如何配合）](#标准工作流三技能如何配合)
 - [注意事项](#注意事项)
 - [常见问题 FAQ](#常见问题-faq)
+- [贡献（Issue / PR 规范）](CONTRIBUTING.md)
 - [English Documentation](README_EN.md)
 - [License](#license)
 
@@ -269,6 +270,24 @@ pvz-hybrid-mod-skills/
 技能是纯 Markdown（frontmatter + 正文），格式通用；但"描述自动触发、闸门自动执行"的体验依赖 WorkBuddy。任何支持自定义系统提示/知识库的 AI 工具都可以手动注入使用。
 
 ---
+
+## 贡献（Issue / PR 规范）
+
+> **⚠️ 本仓库的 `SKILL.md` 会被 AI 直接当作指令加载**——一条错的结论会持续误导后续**所有**会话。
+> 因此本仓库对「证据」与「可复现性」的要求高于普通文档仓库：**不接受凭印象的改动**。
+
+完整规范见 **[CONTRIBUTING.md](CONTRIBUTING.md)**，要点如下：
+
+| 事项 | 要求 |
+|---|---|
+| **Issue** | 必须使用 `.github/ISSUE_TEMPLATE/` 下的表单（空白 Issue 已关闭）；标题格式 `[类型] 一句话结论`；必须给出**可验证证据**（代码文件+行号 / 游戏实测 / 日志片段），不接受「我记得」「应该是」 |
+| **PR 分支** | `<type>/<scope>-<desc>`，type ∈ `feat` `fix` `docs` `tools` `chore` |
+| **提交信息** | `<scope>: <imperative summary>`（首行 ≤72 字符，英文，不加句号）；**合并采用 squash，PR 标题会直接成为提交信息** |
+| **验证证据** | 修正技能内容需**修改前后对照**；改动工具/生成器需 **on-disk 断言 + 负向测试**运行输出；**不接受「假绿」验证**（必须比 GOLD 字面量，且实现产物自己有对账断言） |
+| **禁止入库** | 构建产物（`**/obj/`、`**/.build/`、`bin/`、生成的 mod 工程、构建好的 `.pmod`、对比 PNG）、`.workbuddy/` 会话数据、一次性探针脚本 |
+| **`.bat` / `.cmd`** | 必须**纯 ASCII + CRLF 行尾 + 括号平衡**（cmd 按当前代码页逐字节读脚本，非 ASCII 会导致整行被吞） |
+
+快速入口：[提交内容纠错](https://github.com/josnil/pvz-hybrid-mod-skills/issues/new?template=content-correction.yml) · [报告工具缺陷](https://github.com/josnil/pvz-hybrid-mod-skills/issues/new?template=tool-bug.yml) · [提提案](https://github.com/josnil/pvz-hybrid-mod-skills/issues/new?template=feature-request.yml) · [用法提问](https://github.com/josnil/pvz-hybrid-mod-skills/issues/new?template=question.yml)
 
 ## English Documentation
 
