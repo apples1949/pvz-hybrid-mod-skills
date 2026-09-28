@@ -1756,6 +1756,46 @@ TARGET_DLL = os.path.join(MOD_DIR, "Runtime", "ModAssembly.dll")   # 装机名�
   拿不到就退化成「不刷新」（最坏：用户翻一次分类），绝不硬调 `InitPlant()`。
   扫描间隔（如 10 帧 ≈ 0.17 s）远小于用户点击延迟 ⇒ 正常路径天然不需要刷新。
 
+### ★★ 托管入口里**不要定义 Node/Control 子类**（2026-09-28 实测踩过大坑）
+
+本工坊所有 `runtime_src_*` 都用 **`Microsoft.NET.Sdk`**（不引 Godot.NET.Sdk，避免联网还原包 + 源码生成器）。
+**代价**：`_Ready` / `_Process` / `_GuiInput` / `_Draw` 这些**虚方法回调不会被引擎调用** ——
+把它们接到引擎上靠的是 Godot 源生成器产出的 `InvokeGodotClassMethod`。
+
+症状极具误导性（实测）：
+```
+[ModLoader] package applied: DrawAndGuessProbe; resources=0; runtimeEntry=True; callbacks=0; diagnostics=0
+[DGProbe] Initialize ok | ...
+[DGProbe] host 已挂到 SceneTree.Root；热键 F8/F9/F10/F11     ← 到这儿全对
+（然后永远没有下文：连节点自己的 _Ready 日志都没出现，按键/绘制全无反应，也没有任何 EXC）
+```
+
+**正确写法 = 普通节点实例 + `SceneTree.ProcessFrame` 轮询**：
+
+| 需求 | 不要用 | 改用 |
+|---|---|---|
+| 每帧驱动 | `_Process` | `tree.ProcessFrame += OnFrame`（引擎类型的 C# 事件；`Shutdown` 里记得 `-=`） |
+| 键盘 | `_Input` | 每帧 `Input.IsKeyPressed(Key.F8)` 做边沿检测。**顺带把 F5~F12 全记一遍日志** —— 能立刻分辨「键被游戏吃掉」还是「回调根本没跑」 |
+| 鼠标 | `_GuiInput` | 每帧 `Input.IsMouseButtonPressed(MouseButton.Left)` + 命中判定自己算 |
+| 鼠标坐标 | `Input.GetMousePosition()`（**Godot 4 没这个 API**，会 CS0117） | `viewport.GetMousePosition()`，例如 `tree.Root.GetMousePosition()` |
+| 绘制 | `_Draw` | 维护一张 `Image` → `ImageTexture.Update()` → 赋给普通 `TextureRect.Texture` |
+| 建 UI | — | 照旧 `new CanvasLayer()` / `new TextureRect()` / `new Label()` 都正常（**内置类型由引擎注册**，不需要源生成器） |
+
+**仍然可用**（都是引擎类型上的成员，不依赖源生成器）：
+`SceneTree.Paused`、`Callable.From(...).CallDeferred()`、`Engine.*`、`ResourceLoader`、`Image`/`ImageTexture`、
+`SubViewport`、以及游戏程序集里的公开类型与方法。
+
+> 对照：游戏自己的角色脚本（如 `TowerDefensePlantCubeBox`）可以正常用 `_Ready`/`CallDeferred` ——
+> 因为那些是**游戏工程内**的脚本类，编译时有源生成器。别把结论套到游戏侧代码上。
+
+**两条同批踩到的打包/安装坑**：
+1. **zip 幂等要固定时间戳**：用 `zipfile.ZipInfo(name, date_time=(1980,1,1,0,0,0))` 写入，
+   否则每次打包字节都不同（写入时间戳会变），"内容相同就不重写"的判断**永远失效**。
+2. **换包后游戏可能复用旧解包目录**：`user://ModsCache/<id>-<hash>/` 里若仍是旧 DLL，新代码不生效。
+   把该目录**改名**（如加 `_stale_` 前缀，可逆、别删）即可强制重新解包。
+   另外游戏会把包规范化复制成 `mods/<id>-<hash>.pmod` —— 换版本时**这一份也要一起更新**，
+   否则可能读的是它而不是你手放的那个包。
+
 ### 不开游戏怎么验（本机可行）
 用 `dotnet run --file x.cs` 跑探针，**反射直调游戏程序集里的真函数**（不启动 Godot）：
 - `ModLoader.InferRuntimeEntry` 逐条核对包内路径推出的 `(category,key)` == 我们写的 `provides`；
