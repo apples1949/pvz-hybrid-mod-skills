@@ -423,3 +423,219 @@ override 里**只写 `coverCanDirectPlant` 一个字段**（其余默认值全�
 | `references/plant-verification.md` | Step 10 写闸门、结果可疑、实机前 |
 | `references/plant-pmod-hotpatch.md` | **只有 .pmod 没有生成器**，直接热补丁数值属性（cost/射速/血量…）时 |
 | `assets/新建植物清单.md` | **Step 0 一开始就打开**，逐项打勾 |
+
+---
+
+## ★★ 最省事的「复用内置角色」路线（2026-09-29 实测：经典模仿者 Mod）
+
+当需求是「**内置某植物的行为不对，但不要改它，另建一个植物**」时，**不要**照 §3 的 12 步全套走
+（那套是给"全新美术 + 全新机制"的）。可以只生成 **6 个资源文件**，外观/组件全部 `instance` 内置的。
+
+### 做法
+
+```ini
+# <Key>/Scene/<Key>.tscn —— 整个角色场景直接 instance 内置角色场景
+[gd_scene format=3]
+[ext_resource type="PackedScene" path="res://Asset/Anime/Character/Plant/Chapter0/Imitater/Scene/TowerDefensePlantImitater.tscn" id="1"]
+[ext_resource type="Resource" path="../Config/TowerDefensePlant<Key>.tres" id="2"]
+[ext_resource type="Resource" path="./<Key>ComponentSet.tres" id="3"]
+
+[node name="<Key>" instance=ExtResource("1")]
+ComponentSet = ExtResource("3")
+config = ExtResource("2")
+# 需要改的内置 [Export] 字段直接在这里覆盖（instance 节点可以覆盖任何导出属性）
+metadata/mod_resource_kind = "Character"
+metadata/mod_display_name = "…"
+metadata/mod_character_category = "Plant"
+metadata/mod_character_config_path = "../Config/TowerDefensePlant<Key>.tres"
+metadata/mod_character_sprite_scene = "../Sprite/<Key>.tscn"
+```
+
+```ini
+# <Key>/Sprite/<Key>.tscn —— 精灵场景同样直接 instance
+[gd_scene format=3]
+[ext_resource type="PackedScene" path="res://Asset/Anime/Character/Plant/Chapter0/Imitater/Imitater.tscn" id="1"]
+
+[node name="<Key>" instance=ExtResource("1")]
+metadata/mod_resource_kind = "CharacterSprite"
+```
+
+```ini
+# <Key>/Scene/<Key>ComponentSet.tres —— 直接继承内置的组件定义
+[resource]
+script = ExtResource("3")            # CharacterComponentSet.cs
+ParentSet = ExtResource("2")         # res://Prefab/TowerDefense/Character/ComponentSets/TowerDefensePlantComponentSet.tres
+Components = [ExtResource("1")]      # 内置角色的 xxxExplodeDefinition.tres / FireComponent 定义
+```
+
+**因为 instance 的是完整内置场景**（它自带 `ComponentSet = …`），所以 **Step 4 那条"必须显式声明
+ComponentSet"的坑不适用** —— 但**仍要**在 `metadata/mod_character_sprite_scene` 指向**包内**精灵场景，
+否则 `XWModContentValidation` 会因为查不到 `CHARACTER_SPRITE[<Key>]` 而 throw。
+
+### ⛔⛔ 但"只 instance 内置场景、不写 C#"这条路**跑不通**（2026-09-29 实测定案）
+
+**症状**：Mod 加载成功、卡能显示能选，但**种下时报**：
+
+```
+WARNING: [TowerDefenseManager] Mod 角色脚本实例化失败，回退内置场景路径：<Key>: 角色场景缺少 CompanionOnly 伴随脚本元数据。
+```
+
+⇒ **种出来的其实是内置角色**，于是走了内置角色的技能
+（本次实例：新模仿者被种下后按内置模仿者的 `Explode()` **随机变身**）。
+
+**机制**（`addons/ModEditor/ModSystem/XWModCharacterCompanionRuntime.cs:160-220` `TryCreateInstance`）：
+1. 实例化 Mod 的场景 → `authoredRoot`
+2. 读它的元数据 `mod_character_script_binding` 与 `mod_character_script_path`
+3. **`binding` 必须恰好是字面量 `"CompanionOnly"`，且 `path` 非空**，否则直接失败
+4. `expectedTypeName = Path.GetFileNameWithoutExtension(path)`
+   （如 `./ImitaterClassic.tscn` → `ImitaterClassic`；⚠️ **别用 `.cs`**，会被判可执行文件拒包）
+5. 在 **Mod 的 DLL** 里找满足 `!IsAbstract && Name == expectedTypeName
+   && authoredRoot.GetType().IsAssignableFrom(type)` 的类型
+6. `Activator.CreateInstance(type)` **反射建实例**，再把壳节点的**属性 + 子节点**搬过去，丢弃壳
+
+⇒ **Mod 角色 = 「壳场景（instance 游戏 Prefab）+ DLL 里一个同名 C# 类」**，两者缺一不可。
+包内的**声明文件**只被"取文件名"，但 ⛔ **不能用 `.cs`** ——
+`ModLoader.IsExecutablePackageFile` 的扩展名白名单**包含 `.cs`**（还有 `.gd`/`.bat`/`.exe`/`.cmd`/`.ps1`），
+包内出现它会被判 `undeclared executable package file`、**整包拒收**。
+⇒ **正确做法：`mod_character_script_path` 直接指向场景文件自己（`./<Key>.tscn`）** ——
+   引擎只做 `Path.GetFileNameWithoutExtension()`，**不读文件内容**，类名同样是 `<Key>`。
+
+⚠️ 结论：**"纯数据复用内置角色、一行 C# 都不写"是不成立的** —— 引擎一定会走 Companion 通道。
+如果实在不想写 C# 逻辑，**至少也要放一个空的 `public partial class <Key> : <基类> { }`**。
+
+**官方生成器模板**（`addons/ModEditor/FileSystem/XWResourceCreateRoute.cs:754` 的格式串，照抄即可）：
+
+```ini
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="PackedScene" path="res://Prefab/TowerDefense/Character/TowerDefensePlant.tscn" id="1_base"]
+[ext_resource type="Resource" path="../Config/{Key}Config.tres" id="3_config"]
+[ext_resource type="PackedScene" path="../Sprite/{Key}.tscn" id="4_sprite"]
+
+[node name="{Key}" node_paths=PackedStringArray("sprite") instance=ExtResource("1_base")]
+config = ExtResource("3_config")
+sprite = NodePath("SpriteGroup/TransformPoint/{Key}Sprite")
+metadata/mod_resource_kind = "Character"
+metadata/mod_display_name = "{中文名}"
+metadata/mod_character_category = "Plant"
+metadata/mod_character_config_path = "../Config/{Key}Config.tres"
+metadata/mod_character_script_path = "./{Key}.tscn"
+metadata/mod_character_script_binding = "CompanionOnly"
+metadata/mod_character_sprite_scene = "../Sprite/{Key}.tscn"
+
+[node name="{Key}Sprite" parent="SpriteGroup/TransformPoint" instance=ExtResource("4_sprite")]
+position = Vector2(0, -30)
+
+[editable path="SpriteGroup/TransformPoint/{Key}Sprite"]
+```
+
+DLL 侧：`public partial class <Key> : <authoredRoot 的基类> { }`（可空壳；
+`IsAssignableFrom` 要求它继承**壳场景根节点的类型**，不是随便找个基类）。
+
+### ★ 想改内置脚本里"硬编码的卡池/分类"时：换个自定义 bank，别复刻逻辑
+
+典型案例：内置模仿者 `TowerDefensePlantImitater.Explode()` 里写死了
+`packetBankData.GetCategory("White") + packetBankData.GetCategory("Original")`，
+`Explode()` 又**不是 virtual** 无法覆写，而 Mod 的 `.cs` 也**不能进包**（会被判可执行文件拒收）。
+
+⇒ 正解：**运行时注册一个自定义卡池**，把内置硬编码要取的那个分类名（这里是 `White`）
+直接填成你真正想要的卡列表：
+
+```csharp
+var rm = ResourceManager.Instance;
+var data = new TowerDefensePacketBankData();
+data.category["White"] = 你的卡 key 列表;      // ← 填进"内置硬编码会读的那个分类名"
+data.category["Original"] = new Godot.Collections.Array();
+rm.TOWERDEFENSE_PACKETBANKS["你的Bank名"] = data;   // Dictionary 可写（属性是 private set，但内容可改）
+```
+
+再把角色场景的 `packetBank = "你的Bank名"` ⇒ 零逻辑复刻、零副作用、不动内置资源。
+（`TowerDefenseManager.GetPacketBankData(name)` 就是从这个字典查的。）
+
+需要"随机抽卡"时：`GetPacketBankData(bank).GetCategory("White").PickRandom()`，
+再 `TowerDefenseManager.GetPacketConfig(key)`。
+⚠️ **别忘了把自己的卡排除掉**，否则随机抽到自己 → 死循环。
+
+### 卡池分类名与 `PACKET_TYPE` 数值
+
+```
+NOONE=-1, WHITE=0, GOLD=1, DIAMOND=2, COLOUR=3, STAR=4, ORIGINAL=5, ZOMBIE=6, COVER=7, GRAY=8
+```
+（内置模仿者卡片写的是 `type = 5` = **ORIGINAL**，不是 STAR —— 别数错。）
+
+要进选卡/图鉴：往 `TOWERDEFENSE_PACKETBANKS["GeneralPlant"].category["<分类>"]` 追加卡 key
+（check-then-add 幂等），并补 `Include` 闭包里的派生库（实测只有 `Total`）。
+
+### 自写打包脚本的两个必踩坑（2026-09-29 实测）
+
+1. **资源忘进包**：手写 `zipfile` 时很容易只写 `mod.json` + `Runtime/ModAssembly.dll`，
+   把 `Resources/` 整个漏掉（包会小得可疑，加载期报"缺少 CharacterSprite"）。
+   ⇒ 必须 `os.walk(Resources)` 全部写入。
+2. **"mod.json 在根"的护栏写成 `sorted(namelist)[0]`** ⇒ **必然误报**：
+   排序后 `Resources/...` 排在 `mod.json` 前面（`'R'`=82 < `'m'`=109）。
+   ⇒ 用 **`z.namelist()[0]`（写入顺序）** 判断，并补一条
+   "`mod.json.resources` 声明 vs 包内实际文件"的一致性断言（两边排序后逐项比对）。
+
+---
+
+### ★ 「Mod 植物」页签是 ModLoader 自动加的 —— 想去掉只能在运行时做（2026-09-29 定案）
+
+**现象**：装了带卡片（`provides.Packet`）的 Mod 后，选卡界面右上角**必然**多出一个
+「Mod 植物」页签，图鉴里也多一类。**`mod.json` 里没有任何开关能关掉它。**
+
+**源码证据**：
+- `addons/ModEditor/ModSystem/XWModContentCatalog.cs:107` `WithPlants(original)`：
+  **深拷贝**传入卡池，再 `category["ModPlants"] = 所有 Mod 植物 Packet 的 key`。
+  收集条件（`GetPackets(plants:true)`）：`characterConfig is TowerDefensePlantConfig`
+  **且** `TOWERDEFENSE_CHARCATERS` 含它 **且** `CHARCTAER_SPRITE` 含它
+  ⇒ 所以你必须同时 `provides` **Character + CharacterSprite + Packet** 才会被收进去。
+- **调用点**：选卡界面 `TowerDefenseBattleFeaturePacketBank.SetPacketBankData()` L248
+  （仅当 `packetBankType == "GeneralPlant"` 且 seedBank 是 `CHOOSE` 模式）；
+  图鉴 `Almanac.cs:219`。
+- `TowerDefenseBattleFeaturePacketBank.cs:250`：页签按钮是 `cardSort/CardMod`，
+  `Visible = packetBankData.category.ContainsKey("ModPlants")`。
+
+**⛔ 为什么不能"干脆不声明 `provides.Packet`"**：
+`TowerDefensePacketConfig.Unlock()` → `XWModPlayerProgressService.TryPacketUnlock()`
+先查 `GetContentOwner("Packet", saveKey)`：
+- 非 Mod 卡（owner 空）⇒ 落到原逻辑 ⇒ **`unlockCheckList` 为空时 `return false`（判定未解锁）**
+  ⇒ 卡变灰点不动；
+- Mod 卡 + `unlockCheckList` 为空 ⇒ `unlocked = true` ✅（正是我们要的"开局即解锁"）。
+⇒ **必须声明 `provides.Packet`。**
+
+**运行时去掉的办法**（要"只出现在钻卡页"时）：
+```csharp
+// 1) 全局卡池：往目标分类追加自己的 key（check-then-add 幂等）
+var gp = TowerDefenseManager.GetPacketBankData("GeneralPlant");
+var arr = gp.category["Diamond"].AsGodotArray();
+if (!arr.Contains(MyKey)) { arr.Add(MyKey); gp.category["Diamond"] = arr; }
+
+// 2) 关卡内的卡池副本：从 ModPlants 摘掉自己
+var pb = (TowerDefensePacketBankData)GetMember(bankFeature, "packetBankData");  // 反射
+if (pb.category.ContainsKey("ModPlants")) {
+    var mp = pb.category["ModPlants"].AsGodotArray();
+    mp.Remove(MyKey);
+    if (mp.Count > 0) pb.category["ModPlants"] = mp;   // 还有别的 Mod 卡 ⇒ 只摘自己
+    else {
+        pb.category.Remove("ModPlants");
+        // ★ 必须手动隐藏按钮：它的 Visible 只在 SetPacketBankData() 里设过一次
+        var btn = ((Node)GetMember(GetMember(bankFeature,"packetBank"), "cardSort"))
+                  ?.GetNodeOrNull<Control>("CardMod");
+        if (btn != null) btn.Visible = false;
+    }
+}
+```
+⚠️ **只摘自己的 key，别删别人的**（`ModPlants` 里可能还有其它 Mod 的卡）。
+⚠️ 每帧跑（进关卡时 `packetBankData` 会被 `WithPlants()` 重新构造）。
+
+**追加到目标分类不会"冲突"**：两个分类引用同一个 key，选中/取消行为一致，
+只是玩家在两个页签都能看到这张卡。
+
+### 让卡"条件不满足时不可选"的最省事做法
+
+把 `TowerDefenseInGamePacketShow.alive` 置 `false`：
+- `alive` 的 setter 会调 `ColorSet()` ⇒ **卡面变灰**；
+- `Pressed()` 的守卫 `else if ((alive || allowPressWhenUnavailable) && !(pressDelayTimer > 0))`
+  ⇒ 点下去**完全没反应**。
+⚠️ **跳过 `select == true`（已入组）和 `@lock == true` 的卡** —— 卡入组时游戏自己会把
+   `alive` 设为 false，那是正常状态，不能被你的"恢复 true"覆盖掉。

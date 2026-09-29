@@ -57,6 +57,37 @@ agent_created: true
 **两份游戏构建各跑一遍**）、`.cache/check_idempotent_*.py`（3 连跑字节稳定 + 增量清理 + 镜像一致），
 以及一个只读收尾核对脚本（`.cache/final_report_*.py`）。
 
+## ★ 交付给用户时的「工作目录 zip」格式（2026-09-28 用户指定）
+
+> 用户说「打包到桌面」时，**要的是把整个 Mod 工程目录 + 技能仓库目录一起压成一个 zip**，
+> 不是只给 `.pmod`，也不是自创 `01_成品/02_源码/03_技能记录/` 分类目录（该做法已被明确否掉）。
+
+参照样本：`C:\Users\txgcs\Downloads\杂交版Mod制作-打包-20260927-v2.zip`
+
+### 顶层结构（每个 Mod 一个目录，平铺）
+
+```
+<ModName>/                        <- 完整工程目录，原样打入（不要拆分类）
+    README.md                     <- 该 Mod 的交付文档（含需求映射/硬约束/已知副作用/未验证项）
+    mod.json
+    build_pmod.py                 <- 构建+打包+安装脚本
+    runtime_src/                  <- 托管代码源码（.cs / .csproj）
+    Runtime/ModAssembly.dll       <- 编译产物
+    build*.log                    <- 历次构建日志（保留，便于追溯）
+    dist/<ModName>.pmod           <- ★ 成品 pmod 放工程内 dist/ 子目录
+pvz-hybrid-mod-skills-main/       <- 技能仓库完整目录（skills/ + tools/ + README）
+```
+
+### 打法要点
+- **源码 = 工程目录自身**（`runtime_src/` 下），不要再另建 `02_源码/`。
+- **技能记录 = 技能仓库目录自身**（`skills/*/SKILL.md`），不要再另建 `03_技能记录/`。
+- **成品 pmod 必须补一份到 `<ModName>/dist/`**（工作区的 `dist/` 常在 `mod/` 母目录，
+  交付时要在各 Mod 目录内补出 `dist/` 才能与参照包一致）。
+- 实现：先 `copytree` 各顶层目录到临时目录（顺便补 `dist/`），
+  再用 `zipfile.ZipFile(tmp, "w", ZIP_DEFLATED)` 按 `relpath` 写入，最后删临时目录。
+- 文件名建议 `杂交版Mod制作-打包-YYYYMMDD-<mod1>-<mod2>.zip`（与参照包命名风格一致）。
+- **输出到用户真实桌面 `C:\Users\txgcs\DesktopNew\`**（不是 `C:\Users\txgcs\Desktop`）。
+
 ## 包结构
 
 ```
@@ -3030,4 +3061,270 @@ fireComponent.timeScale/attackInterval/动画_timeScale/弹数），**任一变�
    子目录）——**查游戏逻辑/字段语义优先读源码**，比反射探针快且准确
    （实例：挡弹判据 = `BlockComponent`；猫窝倍率 = `GetCatPumpkinFireRateScale()=2f`；
    毁灭咖啡豆无 timeScaleValue）。
+11. **★ 清 `ModsCache` 别用 Python 的 `os.rename` / `shutil.move`**（2026-09-29 复现）：
+    在大目录上会**挂起**（目录被句柄占用 / 被杀毒扫描），实测**卡死 5 分钟零输出**。
+    ✅ 改用 `subprocess.run(["cmd", "/c", "move", src, dst], timeout=60)`
+       （同盘走 `MoveFileEx`，瞬间完成）；或让用户手动处理。
+    附带两条纪律：
+    · **打包/装机脚本的日志要"每条实时落盘"** —— 只在最后统一写盘的话，挂住时什么都看不到；
+    · 改名目标名要**带时间戳 + 撞名递增序号**，否则第二次跑就撞 `WinError 183` 中断。
+12. **⛔ 包内「绝不能」出现 `.cs`（本版引擎实测会被拒包）**：    `ModLoader.IsExecutablePackageFile`（`ModLoader.cs:1316`）的扩展名白名单 =
+    **`.dll` / `.gd` / `.cs` / `.bat` / `.exe` / `.cmd` / `.ps1`**
+    ⇒ 包内出现任何一个（且不是 `runtimeAssembly` 指定的那个）都会在 `ValidatePackageArchive`
+      里被判 `undeclared executable package file` ⇒ **整包拒收**，游戏弹「Mod 诊断」窗口。
+    ⚠️ **2026-09-29 我（AI）误读了这个方法**：把相邻的 `IsRuntimeDependencyFile`（只认
+       `Runtime/Dependencies/` 下的 `.dll`/`.pdb`）当成了它，据此做了一个含 `.cs` 的包
+       （v1.0.7），**实机被拒**。⇒ **判据要认准方法名，别拿相邻方法的实现当结论；
+       也不要拿旧版行为推断本版**（技能里"旧版只认 dll/pdb"的说法已作废）。
+    ⚠️⚠️ **更值得记的教训**：本条结论**本来就在本文件第 88 行写着**
+       （"`.cs` 被排除、但 `IsExecutablePackageFile` **认**它 ⇒ 包内绝不能有 `.cs`"）——
+       我在动手前**没有先搜技能**，而是直接去读源码、还读错了方法，**用错误的新知推翻了
+       已有的正确结论**。
+       ⇒ **改规范/推翻既有结论前，先 `grep` 一遍技能里有没有现成答案**；
+         有冲突时，先怀疑自己，再去核对源码。
+    ⇒ 相关：Mod 角色的 CompanionOnly「声明文件」**不能**用 `.cs`，
+      要把 `mod_character_script_path` 指向**场景文件自己**（`./<Key>.tscn`）
+      —— 引擎只做 `Path.GetFileNameWithoutExtension()`，**不读文件内容**。
+13. **★ Mod 自己做输入轮询时，必须与「原生控件路径」互斥**（2026-09-29 实测）：
+    给**自绘按钮**做"暂停兜底轮询"（`Input.IsMouseButtonPressed` + 矩形命中 + 切换）之后，
+    若又把 UI 换成**原生控件**（`CheckBox` / `Button`，且已设 `ProcessMode = Always`
+    让它在暂停时也能收 GUI）⇒ **两条路径会各触发一次**，表现为**一次点击切换两次**
+    （长按 / 连点时抖动成"开→关→开"）。
+    ⇒ **二选一**：要么只用原生控件（靠 GUI 派发），要么只用自绘 + 轮询；
+      若要同时支持两种形态，**必须在轮询入口用开关 `return` 掉**。
+14. **★ 用「状态边沿」识别玩家操作时，必须叠加「确有输入事件」的约束**：
+    想捕捉"玩家刚点了哪张卡"，容易先想到监听某个状态字段的 false→true 边沿。
+    但**游戏自己也会批量改这些状态**（实测：进关卡时按预设卡组恢复 `select = true`），
+    会被误判成玩家操作 —— 一帧内连刷 3 条"玩家刚点选"，还把记录覆盖成错误的那张。
+    ⇒ 边沿检测**必须再叠加"鼠标刚按下那一帧"**（`down && !prevDown`）：
+      玩家操作必伴随输入事件，程序批量改状态不会有。
+15. **★ 还原「被替换前的原对象」优先用固有锚点，别自己缓存**：
+    把 A 的 config 换成 B 后想"取消时还原回 A"，不必额外存原对象 ——
+    `TowerDefenseInGamePacketShow.originalSaveKey` 在首次 `Init()` 时就被固化成 A 的 key，
+    **替换过程中不会变**，反查即可。
+    ⚠️ 反查回来的全局 config **仍要 `Duplicate()` 再传给 `Cover()`**（它会就地改传入对象）。
 
+---
+
+## ★★ 暂停（`SceneTree.Paused`）期间的输入与 GUI —— 时停类 Mod 全程沉淀（2026-09-29 定案）
+
+做"暂停战场但仍要能操作"的 Mod（时停 / 子弹时间 / 暂停菜单）时，**这一节能省 5 轮返工**。
+下面三个是**互相独立**的真因，任缺一个都会让"暂停期间点卡 / 铲子 / 种植物"完全失效；
+前两轮我（v1.0.7~1.0.11）反复在"保活 ProcessMode"上打转，全错。
+
+### 真因 1：命中判定的坐标系 —— **两个坑，先后踩了两次**
+
+```csharp
+// ❌ 坑 1：两个量根本不同坐标系，恒 false
+ctl.GetGlobalRect().HasPoint(viewport.GetMousePosition())
+//   `Control::get_global_rect()` = Rect2(get_global_position(), size)，而
+//   `get_global_position()` 只含祖先 Node2D/Control 的 transform，
+//   **不含 viewport 的 canvas transform**（只有 with_canvas 那版才含）；
+//   而 GetMousePosition() 是窗口像素坐标。UI 挂在带缩放的 CanvasLayer 下时差一个量级。
+
+// ❌ 坑 2（v1.0.14 加进去、v1.0.15 才实测发现）：Rect2 含 position！
+ctl.GetRect().HasPoint(ctl.GetLocalMousePosition())
+//   `Control::get_rect()` 的实现是 `Rect2(get_position(), get_size())`
+//   —— **含控件在父容器里的 position**；而 `get_local_mouse_position()` 是
+//   `get_global_transform_with_canvas().affine_inverse() * viewport_mouse`，
+//   **控件自身坐标系**（原点 = 控件左上角）。两者原点不同 ⇒ 恒 false。
+//   实测证据：`localMouse=(50.72815, 50.991257)` 明明落在 94x60 内，
+//   hit 却是 False —— 因为 rect 的 y 起点是它在 VFlowContainer 里的槽位偏移（≈62）。
+
+// ✅ 唯一正确写法（局部坐标 vs 零原点 rect）
+new Rect2(Vector2.Zero, ctl.Size).HasPoint(ctl.GetLocalMousePosition())
+```
+
+**教训**：用"两个都得来自同一坐标系"来校验你的命中判定 ——
+`GetLocalMousePosition()` 配 `Rect2(Vector2.Zero, Size)`；
+若要配 `GetRect()`，鼠标必须换成**含 position 的同一父坐标系**的量。
+
+**调试这类问题的正确姿势**：把 `localMouse` 和 `rect` **一起打出来**，
+一眼就能看出"明明在 rect 里为什么还是 false"。
+（本次就是靠这一行日志定案的。）
+
+### 真因 2：`Input.IsMouseButtonPressed` 是「按住」语义 ⇒ 切换型接口被调偶数次 = 无变化
+
+```csharp
+// ❌ 错：鼠标按住 0.2s ≈ 12 帧 ⇒ 触发 12 次
+if (!Input.IsMouseButtonPressed(MouseButton.Left)) return;
+packetShow.Pressed();          // 内部是 select = !select（切换！）
+```
+
+12 次切换 = 翻转偶数次 ⇒ **回到原样**，表现就是"点了完全没反应"。
+雪上加霜的是：为了绕开"暂停时防抖位不递减"，我还在**每帧**清 `_pressDelayTimer = 0`
+—— 把游戏自带的 0.2s 防抖（唯一的安全网）亲手拆了。
+
+**修法：改成边沿触发 + 双路冗余**
+1. 本地轮询边沿：`bool edge = down && !_prevMouseDown; _prevMouseDown = down;`
+2. `_Input(InputEvent)` 捕获 `InputEventMouseButton { ButtonIndex == Left, Pressed == true }`
+   （事件天然是边沿；`ProcessMode = Always` 的节点在暂停时仍会收到 `_Input`）。
+3. 帧去重（`_lastPickClickFrame`）保证同帧只消费一次。
+4. **防抖位只在"即将触发动作前"清一次**，不要每帧清。
+
+### 真因 3：落点入口 `ProcessInput()` 无人驱动 + `IsActionJustPressed` 的帧时机
+
+**调用链（必须记住）**：
+```
+TowerDefenseMapControl._PhysicsProcess()          ← Node2D，ProcessMode 继承根 = Pausable
+    └─ if (!isGameRunning && !isGameFail) mapFeature.ProcessInput()
+           └─ TowerDefenseBattleFeatureMap.ProcessInput()      ← 唯一入口（战斗种植/铲除都在这里）
+                  ├─ packetPickControl.ProcessPacketPick(cell, gridPos, mousePos)
+                  ├─ packetPickControl.ProcessTools(...)
+                  └─ packetPickControl.ProcessReleaseInput(mousePos)
+```
+⇒ 暂停时 `TowerDefenseMapControl._PhysicsProcess` **不跑** ⇒ `ProcessInput` 永不执行 ⇒ 种不下去。
+（`TowerDefenseControlNew._Input → process.InputProcess()` **不管种植**，只管波次调试/视图返回，别找错门。）
+
+**修法**：Mod 自己每帧直调 `mapFeature.ProcessInput()`，并反射重置去重位：
+```csharp
+SetMember(mapFeature, "_lastInputPhysicsFrame", ulong.MaxValue);   // 绕过帧去重
+InvokeMethod(mapFeature, "ProcessInput");
+```
+✅ `ProcessInput` 是 **public**，且 `TowerDefenseManager.GetMapFeature()` 能直接拿到（是 GodotObject，非 Node）。
+
+**⚠️ 时机细节**：`ProcessInput` 判"确认种植"走
+`mapControl.IsConfirmInput()` = `Input.IsActionJustPressed("Press")`。
+该 API 在**物理帧**里比较 `pressed_physics_frame == Engine.get_physics_frames()`，
+放到"下一物理帧"再调可能因帧号已推进而判 false。
+⇒ **在 relay 的 `_Input` 回调里收到左键按下时立刻再调一次 `DrivePlanting()`**
+（`_Input` 回调里 `Input` 状态刚被本事件更新 ⇒ `IsActionJustPressed` 必为 true）。
+物理帧里照旧每帧调一次，两者并存无害（种下后 `packetPick` 会被清空，不会重复种）。
+
+**诊断纪律**：`PLANT#N ppc= picked= needs= confirm= phys= paused=` 逐项打出来，
+一眼看出是"没选中"还是"确认判 false"。（`PacketPickControl.NeedsInputProcessing()`：
+`!IsPicking() && !_wasPicking` 时返回 `_toolActivateGrace > 0`，否则 true。）
+
+### 编译环境：`dotnet build` 卡死（NuGet restore + 沙箱 TEMP）
+
+**症状**：`dotnet.exe` 占 170MB+、**日志空、DLL 不更新、3 分钟以上无输出**。
+与"MSBuild 节点残留锁目录"**症状相同但根因不同**——别只想着杀进程。
+
+**两条必须同时做**：
+1. **`--no-restore`**（`obj/project.assets.json` 已存在时跳过 NuGet restore）——本次卡死的**主因**；
+2. `TEMP` / `TMP` / `TMPDIR` / `DOTNET_CLI_HOME` / `NUGET_PACKAGES` **全部重定向到工作区内**，
+   规避沙箱对 `%TEMP%` / `%USERPROFILE%\.nuget` 的拦截。
+3. 另：先 `taskkill /F /IM dotnet.exe` 清残留（旧进程锁 `obj/` 也会卡）。
+
+加上这两条后编译 **19 秒**成功（此前 3 分钟无输出）。可复用脚本见
+`mod/TimeStop/build_and_install.py`（编译 → 打包 → 装机 → 清缓存一条龙）。
+
+### Godot 4 C# API 速查（本次编译报错踩到的）
+
+| 想用 | Godot 4 C# 实际 |
+|---|---|
+| `Transform2D.Xform(v)` | ❌ 不存在（Godot 3 的名字）⇒ 用 `xf * v` |
+| `CanvasLayer.GetCanvasTransform()` | ❌ 不存在 ⇒ 只有 `CanvasItem.GetCanvasTransform()` |
+| 鼠标在控件局部坐标 | ✅ `Control.GetLocalMousePosition()` |
+| 鼠标在某 CanvasItem 的 canvas 坐标 | ✅ `CanvasItem.GetGlobalMousePosition()` |
+| 控件在窗口坐标的矩形 | 自己算：`xf = ctl.GetGlobalTransformWithCanvas(); xf * Vector2.Zero` / `xf * ctl.Size` |
+| 诊断输出不被 Mod 日志开关吞 | `GD.Print(...)`（区别于受门控的自建 `Info()`） |
+
+### ★★★ 铁律：手写 csproj 的 Mod 里，自定义 `Node` 子类的回调**不会被引擎调用**（2026-09-29 定案）
+
+**症状**：Mod 逻辑"看起来挂上了"，但**一行日志都没有**、功能全不生效。
+
+**根因**：Mod 程序集为了避开联网还原，通常**手写 `.csproj`**（只 `Reference` 两个 DLL，
+不用 `Godot.NET.Sdk`）⇒ **没有 Godot 的源码生成器**。
+Godot 4 的 C# 脚本必须由源码生成器注册虚方法表
+（`InvokeGodotClassMethod` / `GetGodotClassPropertyList` / `_GetGodotMethodList` …）；
+**没有生成器时，引擎根本不知道你的类有哪些虚方法** ⇒
+`_Ready` / `_Process` / `_PhysicsProcess` / `_Input` / `_GuiInput` **永远不会被调用**，
+而且**完全静默**（不报错、不告警）。
+
+**哪些能用、哪些不能用**：
+
+| 形态 | 是否被调用 | 原因 |
+|---|---|---|
+| `Initialize` / `OnAllModsLoaded` / `Shutdown` | ✅ | ModLoader **反射**调用入口类，不走 Godot 虚方法表 |
+| `Callable.From(Action)` + `SceneTree.Connect("process_frame"/"physics_frame", …)` | ✅ | **信号**通道，运行时构造，不需要生成器 |
+| `SceneTree.Connect` 到**游戏节点**的 C# event / Godot signal | ✅ | 同上 |
+| 给**游戏原生节点**设 `ProcessMode = Always` | ✅ | 游戏程序集自己有生成器 |
+| **你自己的 `Node`/`Control` 子类** 的 `_Process`/`_PhysicsProcess`/`_Input`/`_Ready` | ❌ **静默失效** | 无生成器 ⇒ 引擎不认识 |
+
+**⇒ 结论：Mod 里想"每帧跑点什么"，一律用信号，不要靠自定义节点的 `_Process`。**
+
+```csharp
+// ✅ 唯一可靠写法
+_tick = Callable.From(new Action(OnProcessFrame));
+_tree.Connect("process_frame", _tick);
+_phys = Callable.From(new Action(OnPhysicsFrame));
+_tree.Connect("physics_frame", _phys);      // ★ 暂停时照样发
+// Shutdown 里记得两处都 Disconnect
+```
+
+**`physics_frame` / `process_frame` 在 `paused` 时依然发**：
+`SceneTree::physics_process()` 先 `emit_signal("physics_frame")`，之后才做受 `paused` 门控的
+`_process(true)`；`Main::iteration()` 无条件调 `physics_process()`。
+`SceneTree::process()` 同理先 emit `process_frame`。
+
+**排查这类问题的方法论**（本次靠它定案）：
+1. 在**每个可能的入口**都打一条**心跳**日志（`GD.Print` 直出，别用受门控的自封装 `Info()`）；
+2. 跑一次游戏，`grep` 心跳 —— **哪条没出现，就是哪条通道断了**；
+3. 本次实证：`process_frame` 的心跳有、`relay._PhysicsProcess` 的心跳**一条没有** ⇒ 立刻锁定。
+
+⚠️ **别被"看起来运行了"骗到**：`AddChild` 成功、`IsInstanceValid` 为真、节点在树里
+—— **都不代表它的回调会被调用**。唯一判据是**日志里有没有它打的行**。
+
+### 同节：命中判定与"按住"语义（时停 Mod 实测，两个独立 bug）
+
+1. **`Control` 命中判定**（三种写法，**只有最后一种对**）：
+   ```csharp
+   ctl.GetGlobalRect().HasPoint(viewport.GetMousePosition())                 // ❌ 跨坐标系
+   ctl.GetRect().HasPoint(ctl.GetLocalMousePosition())                       // ❌ rect 含 position
+   new Rect2(Vector2.Zero, ctl.Size).HasPoint(ctl.GetLocalMousePosition())   // ✅
+   ```
+   ⛔ `CanvasLayer` **没有** `GetCanvasTransform()`（只有 `CanvasItem` 有）。
+
+2. **`Input.IsMouseButtonPressed` 是"按住"语义**：拿它当"点击"会在一秒内触发十几次；
+   若目标接口是**切换型**（如 `Pressed()` 里的 `select = !select`），翻转偶数次 = **回到原样** ⇒
+   表现为"点了完全没反应"。⇒ 必须做**边沿检测**（`down && !prevDown`）。
+
+
+### ★★★ 铁律 20：改卡槽卡的 `config.saveKey` 必须同步管 `seedBank.packetNameSet`（2026-09-29 模仿者 Mod 定案）
+
+**症状**：卡能加进卡槽一次，删掉后就**再也加不回来**（点卡池那张完全没反应）；
+表现为"无法模仿 X""无法再选"。
+
+**根因链**（`Registry/Battle/Feature/SeedBank/Control/TowerDefenseInGameSeedBank.cs`）：
+```
+AddPacket()    → packetNameSet[config.saveKey] = true      // 键 = saveKey
+DeletePacket() → packetNameSet.Remove(_packet.config.saveKey)  // 也用 saveKey
+```
+而 Mod 若用 `Cover(newCfg)` 把那张卡的 `config.saveKey` 换成别的（例如"模仿者卡显示成被模仿植物"），
+`AddPacket` 塞进去的旧键 **永远不会再被 Remove** ⇒ `HasPacket(旧键)` 恒 true
+⇒ `TowerDefenseBattleFeaturePacketBank.BindVirtualizedPacket()` 里
+   `packet.alive = !seedBank.HasPacket(saveKey)` 恒 **false**
+⇒ `PacketChoose()` 加卡分支 `if (!packet.alive || !seedBank.CanAddPacket()) { packet.Reset(); return; }`
+   **直接拒绝入槽**。
+连带：真植物的键被 `Remove` 掉 → `HasPacket(真植物)` 恒 false → 卡池那张 `alive` 恒 true → 可能重复加卡。
+
+**修法（推荐，最稳）**：每帧按"**身份键**"重建 `packetNameSet`。游戏自己判定卡身份用的是
+`originalSaveKey`（非空时）否则 `config.saveKey`（见 `FindSelectedPacket()` / `DeletePacket()` /
+`EmitChooseOverAsync()`），所以重建必须用同一口径：
+```csharp
+Godot.Collections.Dictionary pns = seedBank.packetNameSet;   // public Dictionary
+pns.Clear();
+foreach (var c in seedBank.packetList) {
+    if (c == null || !GodotObject.IsInstanceValid(c)) continue;
+    var cf = c.config; if (cf == null || !GodotObject.IsInstanceValid(cf)) continue;
+    string idKey = string.IsNullOrEmpty(c.originalSaveKey) ? cf.saveKey : c.originalSaveKey;
+    pns[idKey] = true;
+}
+```
+⚠️ `Godot.Collections.Dictionary` **不是 `GodotObject`**，`IsInstanceValid(pns)` 直接 CS1503。
+
+**其他配套**：
+- 卡槽卡走**对象池**（`ReturnPacketToPool` → `ResetForPool()` 会清 `originalSaveKey`/事件/精灵）
+  ⇒ Mod 侧按 `GetInstanceId()` 存的"这张卡上次显示成什么"**必须**在该卡离开
+  `seedBank.packetList` 时清掉，否则节点复用后旧值会造成误判/误触发。
+- `DeletePacket()` 会改 `packetList` ⇒ **绝不能在 `foreach (seedBank.packetList)` 里调它**，
+  要先收集、遍历结束后统一删。
+- "选卡阶段 vs 战斗期"用 `seedBank.hasGameStarted` 区分。战斗期别做"卡消失就删"这类联动：
+  `plantOnce` 的卡被 `QueueFree()` 后**仍留在 `packetList`**，`IsInstanceValid` 为 false
+  会被误判成"不在卡槽"而误删别的卡。
+- "卡槽(已选区) vs 卡池(待选区)"的判定用 **`seedBank.packetList` 成员关系**（HashSet<instanceId>），
+  **别用 `originalSaveKey`** —— 卡池那张同名 Mod 卡的 `originalSaveKey` 也是同一个值。
+- `select` 只是**卡面选中框**开关（`Pressed()` 里 `select = !select`），**不代表"已入卡槽"**：
+  `PacketListChoose()`（「重新选卡」按钮）/ `PacketChooseFromName()`（关卡预设）都不经过 `Pressed()`。
+  "最后选择的植物"的正确来源是 **`seedBank.packetList` 的顺序**（`AddPacket` 追加、`DeletePacket` 移除）。
