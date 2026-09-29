@@ -2406,7 +2406,515 @@ static 字段的 `GetValue(obj)` 自动忽略实例参数，无需分支。
 4. 直接跑打包脚本（打包脚本的"护栏"会再核对 bin 与包内 DLL 一致）。
 **排查提示**：无进程残留、游戏没开锁时也可能复现——不是文件占用，就是 msbuild 退出阶段的偶发卡死。
 
+**★ 第八类坑·补充（2026-09-28 实测，关键解法）**：若**日志 0 字节、obj 产物时间戳也没变**，
+说明它压根没跑起来（不是"卡在退出"）。此时加 **`-p:UseSharedCompilation=false`**
+（关掉 Roslyn 编译服务器 VBCSCompiler）即可正常编译：
+```
+dotnet build X.csproj -c Release -p:UseSharedCompilation=false -v:minimal
+```
+**★ 2026-09-28 二次实测（推荐命令就是上面这条，不要加 `--no-restore`/`--no-incremental`）**：
+小工程（TimeStop，1 个 .cs）**5.7 秒一次过、0 错误**；大工程（HealthCooldownLine，3400 行）
+CoreCompile 也正常产出 `obj/Release/*.dll`，只是**收尾进程可能不退出**（挂住/被 SIGTERM）。
+`--no-incremental` / `-t:Rebuild` / `--no-restore` **更容易挂，别加**。
+**判据速记**：看 `obj/Release/*.dll` **时间戳是否 ≥ 本次编译开始时间**——
+是 → 产物 OK，直接 `cp obj/Release/*.dll bin/Release/` 再打包，别管进程没退出；
+`b*.log` 是 0 字节 → 没跑起来，检查 flag/环境变量后重试。
+
+**★ 第十三类坑：暂停/冻结与时停类 Mod（2026-09-28 源码定案，做"时停/暂停"必读）**：
+- **游戏的"暂停"机制是 `GetTree().Paused = true`，不是 `Engine.TimeScale`**。
+  `Core/DialogManager/Base/DialogBoxBase.cs` L57-66：`pasue=true` 时
+  `base.ProcessMode = Always; GetTree().Paused = true;`
+  （`BattleOption.tscn`、`Pause` 等对话框都设了 `pasue = true`）→ **打开设置页游戏就暂停了**。
+- **⚠️ 不能用 `Engine.TimeScale = 0` 做时停**：`DialogBoxBase._Ready()` 会把它**强制设成 1.0**、
+  `CloseDialog()` 再写回 `saveTimeScale` —— 玩家开/关任何对话框都会覆盖掉你的时停。
+- **暂停时"谁还活着"由 `ProcessMode` 决定**，判定在
+  `Core/TowerDefenseManager/SubSystem/TowerDefenseProcessModeDispatch.cs` `ShouldDispatchMode()`：
+  `if (treePaused) return mode == Always || mode == WhenPaused;`
+  ⇒ **要暂停后仍响应，就把节点设 `ProcessMode = Always`**（记下原值，恢复时还原）。
+- **★★★ 最大的坑：`Paused = true` 本来就能冻住僵尸/植物，但"保活"一旦碰到**
+  **`CharacterNode` 的祖先链（尤其是主控根节点）就全废**（v1.0.0→v1.0.2 三轮实测定案）：
+  角色逻辑/动画由 **4 个批处理节点**驱动，它们 `_Ready()` 里**硬编码 `ProcessMode = Always`**
+  （游戏本意：让角色在暂停时播完"受击闪白/死亡消散"）：
+  `TowerDefenseCharacterBatch.cs:93` / `TowerDefenseCharacterMotionBatch.cs:69` /
+  `TowerDefenseZombieBatch.cs:99` / `TowerDefenseShieldImpactBatch.cs:101`。
+  但 `TowerDefenseCharacterBatch._Process()` L127-144 与 `TowerDefenseZombieBatch._PhysicsProcess()` L180+
+  **自己会读 `bool treePaused = GetTree()?.Paused ?? false;` 再逐个角色
+  `TowerDefenseProcessModeDispatch.ShouldDispatch(character, treePaused)` 决定跳过**
+  ⇒ `Paused = true` 时角色**本应被跳过**。
+
+  **★ 真正的解析链（`TowerDefenseProcessModeDispatch.cs`，勿再想当然）**：
+  `ShouldDispatchInherited(parent, treePaused)` → `ResolveEffectiveProcessModeCached(parent)`
+  → `ResolveEffectiveProcessMode(node)`：**while 循环沿 `GetParent()` 一级级向上走，
+  遇到第一个 `!= Inherit` 的 ProcessMode 就返回它**（全 Inherit 才兜底 `Pausable`）。
+  而角色批处理的 `parent` = `TowerDefenseProcessModeDispatch.ResolveBatchParent(source)`
+  → 优先返回 **`TowerDefenseManager.GetCharacterNode()`** = `currentControl.characterNode`
+  = **`TowerDefenseControlNew/CharacterLayer/CharacterNode`**（兜底才用 `tree.CurrentScene` / `tree.Root`）。
+  ⇒ 解析链是：`CharacterNode(Inherit) → CharacterLayer(Inherit) → TowerDefenseControlNew(主控根)`。
+
+  **❌ v1.0.1 曾以为"硬跳过 `CharacterLayer` 子树"就能修好 —— 实测无效（用户报"还是完全没效果"）。**
+  因为递归只改子树、**却把主控根 `TowerDefenseControlNew` 自己也设成了 `Always`**：
+  父链解析会**绕过被跳过的子树继续往上**，正好落到被改过的根 ⇒ `ShouldDispatchMode(Always, true)==true`
+  ⇒ **角色继续跑、时停彻底失效**（日志可证：`保活节点 719 个`，数量大得离谱）。
+  （ps. 该节点子树里 `CharacterLayer`/`CharacterNode` 是**硬编码节点名**，
+  `CharacterLayer/CharacterNode` 是 `GetNodeOrNull<Node2D>("CharacterLayer/CharacterNode")` 可直接取到的路径。）
+
+  **✅ 正确做法（v1.0.2 定案）**：保活前先构建**"禁区"集合** =
+  **从 `CharacterNode` 一路向上到 `SceneTree.Root` 的全部祖先（主控根必然在其中）
+  + `SceneTree.Root` 链**，递归保活时**一律跳过禁区**，只把"纯 UI 叶子节点"设 `Always`。
+  一句话铁律：**做"冻结世界 + 保活 UI"，绝不能修改主控根节点，也不能修改 `CharacterNode` 的任何祖先。**
+- **★★★★ v1.0.5 定案（2026-09-28 晚，最终正确版；v1.0.4 的结论有错，已被本条取代）**：
+  用户报「还是除了时停外什么都动不了」。**三个真根因**（全部解包实证）：
+
+  **根因 1（致命实现 bug）**：`KeepAliveRecursive(control, 0)` 的 `control`（= `TowerDefenseControlNew`）
+  本身在"禁区"里，函数首行 `if (_protected.Contains(node)) return;` **直接返回**
+  ⇒ **整棵 UI 子树被剪断**（`BankUILayer` 种子包、`GUITop` 按钮一个都没保活）。
+  日志实证「保活完成：共 **3** 个节点」。
+  ⇒ **递归保活时，禁区节点必须"只跳过自身、仍递归子节点"**；只有角色分支才整枝剪断。
+
+  **根因 2**：阳光/金币**不在 `ObjectManager` 下，而是直接挂在 `CharacterNode` 下**。
+  解包实证：`Core/TowerDefenseManager/TowerDefenseManager.cs:1282`
+  `ObjectManager.PoolPop(id, characterNode)`、`:3096` `PoolPop(poolKey, GetCharacterNode())`
+  ⇒ 保活 `ObjectManager` **无效**。
+  ⇒ **正确做法：逐个保活 `CharacterNode` 直属子节点里的掉落物实例自己**
+  （`TowerDefenseSunBase` / `TowerDefenseGroundItemBase`），**绝不碰 `CharacterNode`**；
+  阳光持续掉落 ⇒ 每轮扫描要**补保活**（`MaintainDroppableKeepAlive`）。
+
+  **根因 3（核心）**：种植链路的真正入口。❌ 旧结论写的
+  `TowerDefenseMapControl._PhysicsProcess()` → `ProcessInput()` **是错的** ——
+  那条路的条件是 `!isGameRunning`，**游戏运行中根本不调**。
+  ✅ 真链路：
+  `TowerDefenseControlNew._Process()`（受 `ShouldDispatch` 门控）
+  → `GameRunningProcessing(delta)` ［`Scene/TowerDefesne/TowerDefenseNew/TowerDefenseControlNew.cs:1562`］
+  → 遍历 `featureDictionary` 调 `feature.Process(delta)`
+  → `TowerDefenseBattleFeatureMap.Process(delta)` ［`Registry/Battle/Feature/Map/TowerDefenseBattleFeatureMap.cs:905`］
+  → **`ProcessInput()`** ［同文件 :1226，**public**］→ `packetPickControl.ProcessPacketPick(...)` 种植
+
+  **✅ 最终修法：自建"旁路驱动节点"**（`InputRelayNode : Node`，挂 `SceneTree.Root` 下、
+  `ProcessMode = Always`；不在 `CharacterNode` 父链上，绝对安全）：
+  1. `_Input(InputEvent)` → 转调 `control.process.InputProcess(event)`
+     （覆盖**收阳光/金币/工具点击**，因为 `TowerDefenseSunBase._Input` 需要 InputEvent；
+     只转发鼠标/触摸，**不转发键盘**，避免干扰游戏快捷键）。
+  2. `_PhysicsProcess(delta)` → **每帧直调 `mapFeature.ProcessInput()`**
+     （覆盖**种植/铲除/选卡落点**）。
+     `ProcessInput()` **只轮询 `GetViewport().GetMousePosition()`，不看 delta、不看事件**
+     ⇒ **天然免疫暂停门控**，直接调即可。
+     ⚠️ **但它用 `Engine.GetPhysicsFrames()` 做帧去重**（字段 `_lastInputPhysicsFrame`）——
+     暂停时物理帧**不推进** ⇒ 帧号恒同 ⇒ **只处理一次**。
+     ⇒ **每帧必须先用反射把 `_lastInputPhysicsFrame` 置回 `ulong.MaxValue` 强制放行**
+     （与游戏自带 `NotifyMapTransformChanged()` 同法）。
+  3. 只在冻结期间挂载（`EnsureRelay`），恢复时 `RemoveRelay()` 立即移除（否则会双份输入）。
+
+  **判断某节点能否保活的一条铁律：它是不是 `CharacterNode` 的祖先？是就不能动。**
+  **通用做法**：`KeepAliveTarget(node, recurseChildren)` 单点保活 + 日志打印各目标命中数。
+- **★★★★★ v1.0.6 定案（2026-09-28 晚二，**做"时停/冻结"类的关键结论；其中"保活收敛"一条已被
+  下方 v1.0.7 更正，请两条连读**）**：
+  用户实测 v1.0.5 报 5 条：①植物僵尸停止**但动画还在播放**（子弹正常停）②**收不了**阳光、
+  阳光**按惯性继续往下掉落** ③能选种子包**但种不下去** ④铲子能选取**但铲不了也取消不了**
+  ⑤能取消时停 ✓。**三条硬伤**：
+
+  **硬伤 A（致命）：`IsDroppable` 把植物/僵尸当成了"掉落物"。**
+  日志实证 `掉落物=95`（且越掉越多→110），而 `DIAG 阳光节点扫描 找到 0 个`。
+  **★ 必须记住的继承关系（解包真相）**：
+  ```
+  TowerDefenseGroundItemBase : Node2D                      (Prefab/TowerDefense/Base/)
+    ├─ TowerDefenseCharacter : TowerDefenseGroundItemBase  ★ 植物/僵尸全都继承它！
+    └─ TowerDefenseCoinBase  : TowerDefenseGroundItemBase  （金币族 Gold/Silver/TQ/YB/GoldShard/LuckyBag）
+  TowerDefenseSunBase : Node2D                              （独立，**不**继承 GroundItemBase）
+  ```
+  旧判据 `IsSubclassNamed(t,"TowerDefenseGroundItemBase")` ⇒ **95 个植物/僵尸被设 `Always`**。
+  **为什么"停止"了却"动画还在播"？**
+  · 角色逻辑走 `_PhysicsProcess`（受 ProcessMode 影响 → 停了）
+  · **动画走 `Tween`/`AnimationPlayer` ⇒ 引擎级，完全不受节点 ProcessMode 门控 ⇒ 继续播**
+  ⇒ **★ 铁律 1：动画不受 ProcessMode 门控。想停动画必须显式停播放器/补间。**
+  ⇒ **★ 铁律 2：查"两个类是否同族"必须看完整继承链**，别见共同基类名就当同类。
+
+  **硬伤 B：把掉落物设 `Always` ⇒ 它们**继续下落**（不是冻结）。
+  `TowerDefenseSunBase._PhysicsProcess` 正是"落地停住"的判定器：
+  `if (!over && _sprite.Position.Y > height && _moveComponent.velocity.Y > 0f) { … MoveClear();
+   SetPhysicsProcess(false); }`。设 `Always` ⇒ `_PhysicsProcess` 活了 ⇒ `MoveComponent` 继续驱动下落。
+  ⇒ **★ 铁律 3：`Always` 是"整个节点活过来"（`_Process`/`_PhysicsProcess`/动画一起活），
+  不只是"能收输入"。凡"想让它收点击但别动"的节点，**绝不能设 Always** ——
+  必须在旁路节点里**代它做事**（见下）。**
+
+  **硬伤 C：泛撒网保活了 570 个 UI 节点**（含 `AnimationPlayer`/`AnimatedSprite`）⇒ 动画继续播。
+  ⇒ **保活面必须收敛到最小**（本 Mod 最终只剩 `TowerDefenseMapControl` 一个）。
+  ⚠️ **但注意：本条"收敛到 1 个"在 v1.0.7 被证明"砍过头了"（导致选不了种子包/铲子），
+  正确口径见下方 ★ v1.0.7 定案 —— 应为"逐枝验证后精准保活"，而非一律全砍。**
+
+  **✅ v1.0.6 最终架构（推荐照抄）**：
+  · **保活白名单 = 1 个节点**（`TowerDefenseMapControl`）。**删除** `KeepAliveRecursive` 泛撒网。
+  · **掉落物一律不保活**（保持冻结、静止在空中），改为**旁路节点主动收集**：
+    新增 `CollectDroppablesAtMouse()`，在 relay 的 `_PhysicsProcess` 里每帧跑：
+    `Input.IsMouseButtonPressed(MouseButton.Left)` 时，遍历 `CharacterNode` 子节点，
+    做**与游戏源码逐字一致**的圆命中判定，命中就调 **public `Collection()`**：
+    | 类别 | 判据（源码逐字） | 用哪个坐标 |
+    |---|---|---|
+    | 阳光 `TowerDefenseSunBase._Input` | `IsPointInCircle(mouse, X.GlobalPosition, 40f*Scale.X)` | **`_sprite`（private，反射）** |
+    | 金币 `TowerDefenseCoinBase._Input` | `IsPointInCircle(mouse, X.GlobalPosition, 30f*Scale.X)` | **`spriteNode`（private，反射）** |
+    ⚠️ **两处都用 sprite 子节点的 GlobalPosition，不是掉落物节点自身位置**（阳光 sprite 有动画偏移）。
+    `Collection()` 在 `TowerDefenseSunBase`（L382）与 `TowerDefenseCoinBase`（L278）**都是 public** ✓。
+  · 种植/铲除：仍由 relay 直调 `mapFeature.ProcessInput()`（见上条）。
+
+- **★★★★★ v1.0.7 定案（2026-09-28 晚三，**v1.0.6 的两条过度收缩，必读并更正上一条**）**：
+  用户实测 v1.0.6 报 4 条：①动画停住了 ✓ ②**停住但收不了** ③**现在直接无法选择种子包了**
+  ④**现在无法选择铲子**。**三条根因**：
+
+  **根因 1（→ 收不了）：反射代调游戏逻辑时，多加了一条源码没有的守卫。**
+  v1.0.6 在收集判定里写了 `if (GetBoolMember(node,"over")) return;`，但游戏原文是：
+  ```csharp
+  // TowerDefenseSunBase._Input  —— 没有 over 判断！
+  if (!isCollect && Geometry2D.IsPointInCircle(GetGlobalMousePosition(), _sprite.GlobalPosition, 40f*Scale.X))
+      Collection();
+  ```
+  `over` 只表示"已落地停住"，**时停期间阳光恰好全部处于落地状态** ⇒ 被这条多出来的守卫
+  一票否决，**永远收不到**。
+  ⇒ **★ 铁律 4：反射代调游戏逻辑时，守卫条件必须逐字对齐源码。**
+  多一条、少一条都会造成"看起来合理但就是不行"的顽固 bug。做法：把源码原文抄进注释，
+  逐字符比对，一字不差再写。
+
+  **根因 2（→ 收不了）：鼠标坐标空间不一致。**
+  用 `GetViewport().GetMousePosition()`（**视口坐标**）去比 `sprite.GlobalPosition`（**世界坐标**）。
+  `CharacterLayer` 是 `CanvasLayer` 且 `follow_viewport_enabled=true`，相机偏移下差一个 canvas
+  transform ⇒ `IsPointInCircle` 永远判不中。
+  ⇒ **✅ 用 `Node2D.GetGlobalMousePosition()`** —— 游戏源码用的就是这个，自带 canvas transform
+  逆变换（含相机偏移）。
+  ⇒ **★ 铁律 5：做"世界坐标"命中判定，鼠标必须用 `Node2D.GetGlobalMousePosition()`，
+  绝不用 `Viewport.GetMousePosition()`（那是视口坐标）。两者在相机移动/CanvasLayer 下不等价。**
+
+  **根因 3（→ 选不了种子包/铲子）：把保活面砍过头了。**
+  v1.0.6 为止血"动画还在播"，把保活面收缩到只剩 `TowerDefenseMapControl` 一个节点，
+  结果顶部种子包/铲子/道具所在的 **`BankUILayer` 失去 `Always`** ⇒ 暂停时 GUI 点击被吞。
+  ⇒ **✅ v1.0.7 正解：不是"全砍"，而是"逐枝验证后精准保活"。**
+  用 awk 验证 `TowerDefenseControlNew.tscn` 的 `BankUILayer` 子树：
+  ```
+  BankUILayer(CanvasLayer) → UITopContainer(HFlowContainer)
+                            → UITopBankContainer(种子包) / MobileInterval / UITopPropContainer(道具·铲子)
+  ```
+  **只有 Container/Control，不含任何 Animation/AnimatedSprite 节点** ⇒ 保活它**不会**让动画继续播。
+  且它是 `CharacterLayer` 的**兄弟分支**，不在 `CharacterNode` 父链上 ⇒ 不破坏冻结。
+  ⇒ **★ 铁律 6："精准保活 UI 枝"与"动画继续播"并不矛盾。**
+  v1.0.5 翻车的原因是泛撒网**把 AnimationPlayer 一起设了 Always**，不是因为"保活了 UI"这件事本身。
+  正确流程：**① 逐枝 awk 扫描该枝内有无 Animation/Tween 宿主 → ② 没有则整枝 `KeepAliveTarget(x,true)`。**
+  全砍（v1.0.6）会造成"选不了种子包"这种更严重的功能缺失。
+  ⇒ **保活面口径（v1.0.7 定案）**：`TowerDefenseMapControl`（1 个）+ `BankUILayer` 整枝（约 6~10 个容器）。
+  仍远小于 v1.0.5 的 570 个，且经扫描证实不含动画宿主。
+
+  **✅ v1.0.7 最终架构 = v1.0.6 架构 + 两处修改：**
+  1. `TryCollectOne` **删除** `over` 守卫；鼠标改用 `GetGlobalMousePosition()`。
+  2. `ApplyKeepAlive` 新增 `KeepAliveTarget(control.GetNodeOrNull("BankUILayer"), true)`。
+- **★★★★★ v1.0.8 定案（2026-09-28 晚四，★★★ 做"时停保活交互"最重要的一条，必读）**：
+  用户实测 v1.0.7 报**「还是一样」**（选不了种子包/铲子、收不了，4 条全未改善）。
+  深挖解包源码后找到**真正根因** —— 前三版（v1.0.4~v1.0.7）**一直在错的地方使劲**：
+
+  **★ 根因 A（决定性）：种子包"选中"完全不走 `mapFeature.ProcessInput()`。**
+  ```csharp
+  // 真实链路（全部实证）
+  TowerDefenseInGamePacketShow.button (Button)   // L1356: button.Pressed += Pressed;
+    → Godot GUI 输入派发 → Button.Pressed 信号
+    → TowerDefenseInGamePacketShow.Pressed()     // L1499，public
+    → OnPressed → PacketPickControl.PickPacket() // L1081 → packetPick = 该包
+  ```
+  **暂停时 Godot GUI 派发被门控**（`_gui_input` 不调用）⇒ 光驱动 `ProcessInput()` **永远选不中卡**。
+  ⇒ **★★★ 铁律 7：`ProcessInput()` 只负责"落点处理"（往哪块地种）；
+  "选中卡/工具"是 **Control 按钮的 GUI 点击**。两者走完全不同的输入路径！**
+  时停要覆盖的交互必须**两条路径都接管**，不能只做一条。
+
+  **★ 根因 B（死锁）：`ProcessInput()` 首行就 `return`。**
+  ```csharp
+  // TowerDefenseBattleFeatureMap.ProcessInput() L1242
+  bool flag3 = ...packetPickControl.NeedsInputProcessing();
+  if (!flag2 && !flag3) return;            // ← 未选中任何东西就早退
+  // PacketPickControl.NeedsInputProcessing() L591
+  if (!IsPicking() && !_wasPicking) return _toolActivateGrace > 0;  // 初始 0 ⇒ false
+  // 而 _toolActivateGrace 只在 ProcessReleaseInput()(L1269) 递减，
+  // 后者只在 ProcessInput() 内部被调 ⇒ 死锁
+  ```
+
+  **★ 根因 C：状态机计时器卡死。**
+  `TowerDefenseInGamePacketShow.Pressed()` L1509 守卫 `!(pressDelayTimer > 0.0)`，
+  而 `pressDelayTimer` **只在 `_PhysicsProcess`(L1383) 递减** ⇒ 时停时卡在 0.2
+  ⇒ 第二次点击必被挡。
+
+  **✅ v1.0.8 架构（推荐照抄）：旁路节点主动点按钮，且这是唯一路径。**
+  ```csharp
+  // relay._PhysicsProcess 里，顺序很重要：先选卡，再驱动落点
+  Entry?.DrivePacketAndToolClick();   // ① 命中按钮矩形 → 直调 Pressed()/PickTool()
+  Entry?.DrivePlanting();             // ② mapFeature.ProcessInput() 落点
+  Entry?.CollectDroppablesAtMouse();  // ③ 收阳光/金币
+  ```
+  · 命中判定：`(node as Control).GetGlobalRect().HasPoint(viewport.GetMousePosition())`
+    （**不要**用世界坐标 —— UI 是屏幕空间）。
+  · 种子包：`TowerDefenseInGamePacketShow` 的 `.button` / `.select` / `.alive` / `Pressed()` **全 public**。
+    调用前先 `SetMember(p,"pressDelayTimer",0.0)` **破根因 C**。
+    `Pressed()` 内部是 `select = !select` ⇒ **天然支持"再点一次取消"**。
+  · 铲子：`UITopPropContainer` 子节点里的 `PacketPickTool`，`PickTool(!toolPick)`（**全 public**）。
+    注意 `PacketPickTool : Node`（**不是 Control**），命中判定要在其子树找可见 Control 的矩形。
+
+  **★ 铁律 8：同一动作只能有一条路径。**
+  v1.0.7 试过"保活 `BankUILayer` 整枝"让按钮自己收点击，结果与"主动调用"**互相抵消**
+  —— 切换类操作被触发两次 = 没切换 ⇒ 用户看到"还是一样"。
+  **保活（让节点自己收输入）与主动调用（代它触发）二选一，不可并存。**
+  v1.0.8 定案选"主动调用"，并**撤掉 `BankUILayer` 保活**。
+
+  **★ 铁律 9：反射调游戏方法前，必须读透它开头的 `return` 守卫与内部状态机计时器。**
+  `ProcessInput` 的 `NeedsInputProcessing()` 前置、`Pressed()` 的 `pressDelayTimer` 前置，
+  都是"看起来能调、实际被静默挡掉"的典型。**调用点附近必须把这些前置状态一并处置。**
+
+- **★★★★★ v1.0.9 定案（2026-09-28 晚五，★★★ 修正 v1.0.8 的两处误判，必读）**：
+  用户实测 v1.0.8 报**「1.能停 2.不能收 3.无法选中和种下 4.无法选中」**。
+  v1.0.7/v1.0.8 在"保活 vs 主动点击"之间反复横跳，本版靠**运行时日志**定位到真相。
+
+  **★ 决定性证据（运行时父链 dump，v1.0.8 日志）**：
+  ```
+  DIAG[种子包父链] / TowerDefenseInGamePacketShow / MobilePacketContainer / … / Packet
+    / TowerDefenseInGameSeedBank / @Control@100 / TowerDefenseCardScroll / CoexistHud
+  DIAG[道具/铲子栏] 未找到 UITopPropContainer。    ← 手机布局
+  保活完成：... 顶部UI枝=0                        ← v1.0.8 撤了保活
+  （无任何"旁路：命中"日志）                       ← 主动点击也没命中
+  ```
+  **源码实证 `TowerDefenseControlNew.cs` L198/L219**：
+  ```csharp
+  uITopBankContainer = GetNode<HBoxContainer>("%UITopBankContainer");  // BankUILayer/UITopContainer/…
+  uITopBankContainer.AddChild(_coexistHud);   // ★ 种子包 HUD 挂在 CoexistHud 下
+  ```
+  ⇒ **★★★ 铁律 10：种子包/顶部 UI 的实际宿主是 `CoexistHud`，运行时动态挂载。**
+  从 `.tscn` **静态**文件根本看不出；**必须 dump 运行时 `GetPath()` 父链**才能定位。
+  教训：静态场景 ≠ 运行时树 —— 所有跟 UI 有关的判断，一律以运行时 dump 为准。
+
+  **v1.0.8 的两处误判**：
+  1. **撤掉 `BankUILayer` 保活是错的** —— 不保活 ⇒ 按钮收不到 GUI 点击（暂停门控）。
+  2. **"旁路主动调 `Pressed()`"没命中** —— `CoexistHud` 会动态改写种子栏
+     `TopLevel`/`Position`（L303-306）⇒ 暂停态 `GetGlobalRect()` 不可靠，矩形命中失败。
+     ⇒ **★ 铁律 11：不要用 `GetGlobalRect()` 做暂停态的 UI 命中判定** ——
+     动态布局（TopLevel/reparent/Container 重排）会让矩形失真。让节点自己收输入更可靠。
+
+  **★ v1.0.9 定案：三条正交职责，互不冲突**
+  | 职责 | 手段 | 说明 |
+  |---|---|---|
+  | 按钮"收点击" | **保活 `BankUILayer` 整枝** | 唯一"选中"路径，让 Button 自己发 `Pressed` |
+  | 落点处理 | relay 调 `mapFeature.ProcessInput()` | 往哪块地种 |
+  | **撤销暂停副作用** | relay 每帧 `ClearPacketPressDelay()` | **★ 第三条正交职责** |
+  | 收掉落物 | relay `CollectDroppablesAtMouse()` | 主动命中 + 调 `Collection()` |
+
+  **★★★ 铁律 12：暂停会把"状态机计时器"一起冻结，这是一类隐藏杀手。**
+  `TowerDefenseInGamePacketShow.Pressed()` L1509 守卫 `!(pressDelayTimer > 0.0)`，
+  而 `pressDelayTimer` **只在 `_PhysicsProcess`(L1383) 递减** ⇒ 时停时卡在 0.2
+  ⇒ **只要点过一次，之后所有点击被静默挡掉**（表现为"完全选不中"）。
+  ⇒ 凡 `_Process`/`_PhysicsProcess` 里递减的计时器（`pressDelayTimer`/`cooldown`/`aliveTime`…），
+  时停期间都必须**主动"代它流逝"**（清零或按 delta 递减）。
+  ⇒ **★ 关键区分：这一步与"保活 vs 主动调用"不冲突** —— 它不是"替游戏点按钮"，
+  只是**撤销暂停造成的计时器冻结**，属于**第三条正交职责**。
+  v1.0.7 曾把"保活+主动点击"混在一起（切换两次=没切换）而失败，
+  但"保活+计时器清零"是安全的组合。
+
+  **★ 铁律 13：反射写"属性"与"字段"要分清。**
+  `pressDelayTimer` 是**属性**（setter 有 `SetProcess` 等副作用），backing field 是
+  `_pressDelayTimer`。清计时器应**优先写 backing field**（`_pressDelayTimer`），
+  取不到再退回属性 setter。
+
+- **★★★★ v1.0.10 定案（2026-09-28 晚六，★ 方法论：停止盲改，先上探针）**：
+  用户实测 v1.0.9 报**「234都不行」**（收不了 / 选不了种子包 / 选不了铲子），
+  并明确 **「可以考虑暂时不解决不能收」** ⇒ 优先级调整为 **选卡/铲子优先**。
+
+  **★★★ 关键证伪：保活 `BankUILayer` 整枝是无效的！**
+  v1.0.9 日志实证 `保活完成：共 325 个节点 … 顶部UI枝=324`（保活**确实生效**），
+  但用户实测**依然选不了**。v1.0.7 同样（保活 324 个，用户报"还是一样"）。
+  ⇒ **保活到 324 个节点仍点不动 ⇒ 问题不在 ProcessMode。**
+  ⇒ **★ 铁律 14：连续 2 版同方向失败 ⇒ 立刻停止盲改，上运行时探针。**
+
+  **✅ 探针要打的东西（照抄）**——对目标 Control 及**逐层祖先**打印：
+  ```
+  visible (IsVisibleInTree()) / mouseFilter (Stop|Pass|Ignore)
+  globalRect (位置+尺寸，看是否飘走/为0) / ProcessMode
+  ```
+  加上 `PROBE[鼠标] 屏幕位置=…` 对照，以及按名模糊搜容器
+  （`Prop/Tool/Shovel/Rake` —— 手机布局下容器名与 PC 不同，
+   `%UITopPropContainer` 在手机布局里可能压根不叫这名）。
+
+  **★ 铁律 15：UI 节点的布局可能被"共存 HUD"运行时重写。**
+  `TowerDefenseCoexistHud`（挂 `uITopBankContainer` 下）会：
+  · 把种子包 reparent 进动态创建的 `TowerDefenseCardScroll`；
+  · 切换布局时改写 `uITopPropContainer.TopLevel` / `Position`（L303-306, L454）。
+  ⇒ 暂停态下的 `GetGlobalRect()` / `Position` 都可能失真，
+  **不能作为命中判定的唯一依据**。UI 命中务必以运行时探针实测为准。
+
+- **★★★★★ v1.0.11 定案（2026-09-28 晚七，★ 探针定位真因，做"时停接管 UI 点击"的**最终结论**）**：
+  探针（v1.0.10）实测数据：
+  ```
+  PROBE[种子包本体] TowerDefenseInGamePacketShow(...,Always) visible=True mf=Ignore rect=(2,59 96x60)
+  PROBE[道具类]     ShovelButton(TextureButton,Always) visible=True mf=Stop rect=(400,0 70x72)
+  PROBE[鼠标] 屏幕位置=(1048.29, 132.37)      ← 与控件 rect 的 x∈[2,470] 不在同一坐标系
+  ```
+  **控件状态全部正常（Always / visible / mf 有效 / rect 非零），但依然点不动。**
+
+  **★★★ 铁律 16（终极结论）：不改 ProcessMode 能让暂停时的 GUI 点击生效 —— 做不到。**
+  Godot 的 GUI 派发链是：`Viewport::_gui_input_event` 做「鼠标窗口坐标 → canvas 空间转换 → 命中」，
+  **这一整段在 `SceneTree.Paused` 时被门控**。保活 `ProcessMode = Always` 只能让节点自己的
+  `_Process`/`_Input` 回调恢复，**恢复不了 Viewport 的 GUI 派发**。
+  ⇒ **v1.0.7 / v1.0.9 的"保活 `BankUILayer` 整枝（324 个节点）"思路根本性错误**，
+  连续两版失败即为此。**不要再走这条路。**
+
+  **✅ 唯一可行方案：旁路节点自己做"命中判定 + 直调 public 接口"。**
+  ```csharp
+  // relay._PhysicsProcess 最前
+  Entry?.DriveUiPicks();
+  // 内部：
+  Vector2 m = viewport.GetMousePosition();
+  if (control.GetGlobalRect().HasPoint(m))        // ★ 直接比即可
+      InvokeMethod(gameObj, "Pressed");            // 或 ShovelButtonPressed()
+  ```
+  **★ 坐标 API 铁律 17**：`Control.GetGlobalRect()` **已经过祖先 transform + CanvasLayer 的
+  canvas transform**，与 `Viewport.GetMousePosition()` **同坐标系**，直接 `HasPoint` 比较。
+  ⚠️ `CanvasLayer` **没有** `GetCanvasTransform()` 方法（写了会 CS1061 编译错），
+  别去手动做 canvas 逆变换 —— 不需要。
+
+  **★★★ 铁律 18：暂停会冻结"防抖计时器/标志位"，这是一类隐藏杀手（v1.0.11 找到两处）。**
+  | 类 | 字段 | 冻结原因 |
+  |---|---|---|
+  | `TowerDefenseInGamePacketShow` | `_pressDelayTimer` | 只在 `_PhysicsProcess`(L1383) 递减 |
+  | `ShovelManager` | `shovelPressedAwait` | debounce 用 `CreateTimer(0.1, processAlways:false)` ⇒ **暂停时 timer 不走** |
+  ⇒ 表现都是**"点过一次之后全废"**。时停期间必须**每帧无条件清零**这些位。
+  ⇒ 这一类处理与"保活 vs 直调"**正交、不冲突**（不是替游戏点按钮，只是撤销暂停副作用）。
+
+  **★ 可直接反射调用的 public 接口（实测）**：
+  - 种子包：`TowerDefenseInGamePacketShow.Pressed()` / `.select` / `.alive` / `.button`
+  - 铲子：`ShovelManager.ShovelButtonPressed()` / `.shovelPressedAwait` / `.shovelPick` / `CanUseShovel()`
+
+  **★ 铁律 19：同一动作只能一条路径（复述，本系列反复踩）。**
+  选了"旁路直调"就必须**撤掉保活**，否则同一动作触发两次（切换类=没切换）。
+
+  **★ 编译环境铁律（本次踩到）：dotnet 编译会卡死。**
+  残留 MSBuild 节点（`dotnet.exe` 进程）会锁住 → 表现为**日志空、DLL 不更新、看似"编译成功"**。
+  解法：`-m:1 -nodeReuse:false` 单节点编译 + 先 `Stop-Process` 清残留 dotnet 进程。
+  标准命令：
+  ```
+  dotnet.exe build -c Release -p:UseSharedCompilation=false -m:1 -nodeReuse:false -v:q -nologo
+  ```
+
+- **⚠️ 反射访问游戏内部字段/方法的可用姿势（本 Mod 实证）**：
+  `TowerDefenseControlNew.process` 是 **public 字段**；
+  `TowerDefenseBattleFeatureMap.ProcessInput()` 是 **public 方法**；
+  `TowerDefenseManager.GetMapFeature()` / `GetCharacterNode()` 是 **public static**；
+  `TowerDefenseBattleFeatureMap._lastInputPhysicsFrame` 是 **private 字段**（需反射写）。
+  `TowerDefenseBattleFeature*` **不是 Node**（是 Resource/GodotObject 派生）⇒
+  **不能用 `FindNodeByClassName` 找**，只能 `TowerDefenseManager.GetMapFeature()` 拿。
+- **⚠️ 内部辅助节点类的字段名不能叫 `Owner`**（2026-09-28 编译踩坑）：
+  与 `Node.Owner` 冲突（CS0108），而且 `Node.Owner` 是"场景序列化归属"，乱设会让
+  辅助节点被当成场景一部分。改名（如 `Entry`）。
+  `AddChild` 的第三参要写全 **`Node.InternalMode.Disabled`**（裸写 `InternalMode` 报 CS0103）。
+- **★★★★ 最关键的输入口铁律：`Paused = true` 时，`_input` / `_unhandled_input` / `_gui_input`
+  全部**都不会被调用**（官方文档原文："`_process`, `_physics_process`, `_input`, and
+  `_input_event` functions will not be called"）。**取消暂停唯一的例外是 —— 该节点
+  `ProcessMode = Always`（或 `WhenPaused`）。**
+  （2026-09-28 曾一度误以为"`_Input` 不受 Paused 影响" —— **这是错的，已纠正**。
+  `SceneTree.process_frame` **信号**确实暂停时照发（`SceneTree::process()` 无条件 emit），
+  但那是"信号"，**不等于** `Node._input()` 回调会跑 —— 两者别混。）
+  ⇒ 推论：
+  1. **自建按钮的点击，在暂停时一定会被吞**，除非给按钮（或其某个祖先，但不能是主控根）
+     设 `ProcessMode = Always`。**这是"能开不能关"的直接原因。**
+  2. 想在暂停时保留"种植/铲除/收集"等操作，光给 UI 节点设 `Always` **不够**
+     （种子包按钮本身能收到点击，但**落点判定/种植逻辑在 `_Process` 链上、被门控**）——
+     **必须自建"旁路驱动节点"**：`_PhysicsProcess` 里直调 `mapFeature.ProcessInput()`（种植/铲除），
+     并主动做命中判定调 `Collection()`（收阳光/金币）。
+     ⚠️ **不要把掉落物/角色设 `Always` 来"让它自己收 `_Input`"** —— 那会让它的
+     `_Process`/`_PhysicsProcess`/动画一起活过来（v1.0.5 实测：阳光继续下落、
+     植物僵尸"停止但动画在播"）。**旁路节点代劳才是正解。**
+     两者都要小心别碰到 `CharacterNode` 的祖先链。
+  3. 最稳妥的"暂停后仍能点"自建 UI：把**整个自建 UI 用一个 `CanvasLayer`/`Control` 容器承载**，
+     给**该容器**设 `ProcessMode = Always`（挂在主控树下、但**不是** `CharacterNode` 的祖先），
+     子节点继承即可。
+- **⚠️ 兜底点击通道（当 GUI 输入被门控/不确定时用）**：
+  在 `SceneTree.process_frame` 信号回调里轮询
+  `Input.IsMouseButtonPressed(MouseButton.Left)` + 目标 `Rect2(GlobalPosition, Size).Grow(3f)`
+  命中判定，直接触发逻辑；与 `_gui_input` 用 `SceneTree.GetFrame()` 记录的"最近触发帧"去重。
+  ⚠️ **`SceneTree.GetFrame()` 在 C# 里返回 `long`，不是 `ulong`**（写 `ulong` 会 CS0266 编译错）。
+- **⚠️ 排查"mod 到底跑没跑新版本"时，不要只看日志文案**（2026-09-28 踩坑）：
+  用户目录下有两套日志 —— `PVZHE_Logs/godot_startup_<时间>.log`（带 `[CrashLogger]` 头，
+  可能是**上一次会话的备份**）与 **`logs/godot.log`（+ `logs/godot<时间>.log`，才是当前实时输出）**。
+  **最可靠的版本判据**：直接取**部署的 DLL**（`ModsCache/<Mod>/Runtime/ModAssembly.dll`）
+  算 md5 与本地 `bin/Release/*.dll` 比对，并用 python 查该 DLL 里**新版本独有的字符串**
+  （`'新文案'.encode('utf-16-le') in open(dll,'rb').read()`）—— 比看日志文案靠谱得多。
+- **游戏内主控节点**：`TowerDefenseControlNew`（`_Input` L1071 里
+  `process.InputProcess(event_)`；`_UnhandledInput` 处理 Pause 键；
+  `_PhysicsProcess` L1031 累加 `runGameTime` 并有**失焦自动暂停**逻辑）。
+- **游戏内按钮定位（★tscn 实测，节点名与字段名都拿到了）**：
+  主场景 `Scene/TowerDefesne/TowerDefenseNew/TowerDefenseControlNew.tscn`，
+  按钮都在 `GUITop`（CanvasLayer, layer=3）下：
+
+  | 节点 | 字段名 | 位置 | 备注 |
+  |---|---|---|---|
+  | `ButtonPause` | `buttonPause` | 右上 `-105,0→0,77` | "菜单" |
+  | `CheckBox2X` | `checkBox2X` | 右上 `-107,64→-5,128`，scale 0.78 | **"加速"**（联机时隐藏） |
+  | `OptionButton` | `optionButton` | **左下** `4,-56→139,75`，scale 0.4 | 齿轮＝CD 入口 |
+  | `ShopButton`/`AlmanacButton` | — | 右下 | 商店/图鉴 |
+
+  场景主结构：`CharacterLayer`(含 `CharacterNode`/`ZombieCheckArea`/`CharacterCanvasModulate`)、
+  `BankUILayer`(`UITopContainer`)、`GUITop`、`ZombieWonLayer`、`State`(状态机)、`UITopAnimationPlayer`。
+  定位基准推荐**反射读字段**（`checkBox2X`/`optionButton`），位置用"运行时实测的
+  `GlobalPosition`+`Size`"推算而非硬编码 offset（换分辨率/UI 缩放不跑偏）；
+  基准按钮 `Size.Y < 1` 时说明还没 layout，**延后到下一轮再建**。
+- **⚠️ 定位按钮时不要要求 `IsVisibleInTree()`**（2026-09-28 实测踩坑）：
+  tscn 里 `CheckBox2X`（加速）/`OptionButton`（齿轮）/`ButtonPause` 等**都写着 `visible = false`**，
+  进关卡后才显形。若判据写 `if (btn.IsVisibleInTree()) 采用` —— 早期扫描会**误判"找不到加速"**
+  而回退到齿轮，按钮就跑到左下角去了（用户报"按钮位置不对"）。
+  **判据应为"节点有效"**，布局是否就绪交给 `Size.Y` 检查兜底。
+- **防穿透**：自建 UI 按钮的 `GuiInput` 里要 `GetViewport().SetInputAsHandled()`，
+  否则点击会穿透到战场（顺手种下一棵植物）。
+
 **运行时字段速查（本 Mod 项目沉淀，可直接复用）**：
+- **⚠️ `TowerDefenseCharacter.timeScale` 不是"植物加速倍率"**（2026-09-28 实测定性）：
+  它**含"游戏全局快进倍率"**（日志实测：无加成时 8 种植物**恒为 3**），与 buff 倍率相乘会得到
+  离谱值（用户报"毁灭咖啡豆+咖啡三叶草 → +1400%"）。**要"植物加速"仍应读 buff 的
+  `timeScaleValue` / `FireComponent.timeScale`**；`character.timeScale` 只适合"动画实际速度"这类用途。
+- **⚠️ `BlockComponent`（`IProjectileZone` 实现）拿不到时不要让判定"拦截显示"**：实测墓碑/炸弹/坑洞
+  等**所有**障碍物运行时都取不到该组件 ⇒ 用它当"能否挡子弹"的硬门槛会**静默全拦**
+  （用户报"能挡子弹的也不显示血量"）。**判据必须先用日志验证命中率再启用**；
+  当前策略：**凡有血量（HurtComponent）的障碍物都显示血量**，"挡弹判定"仅作诊断。
+- **★ "能否被攻击"判据（2026-09-28 源码定案，两轮修正后的最终口径）**：
+  **（A）命中盒有效**：`TowerDefenseCharacter._hitBoxAvailable`（命中盒定义有效）
+  **且** `_hitBoxDefaultEnabled` **且** `_hitBoxSuppression == None`；
+  **（B）目标系统口径**（`Core/.../TargetSystem.cs` 693 行）：`instance.canBeCollection`
+  **且** `!instance.invincible` **且** `!instance.hologram`（**且组件 `canProjectileCheck`**）。
+  **A+B 同时成立才算"可被攻击"**。实例：**普通墓碑**（A 不过：无命中盒、抑制=4）；
+  **科技地砖 FloorQX**（A 过、B 不过：`canBeCollection=False`）；
+  **蜘蛛网类 BungiTargetSP**（A/B 都过 **但 `invincible=True`**——**`invincible` 不参与判定！**
+  它表示"不可被普通攻击打死"，不代表"没有血量"）。⇒ **最终判据 =
+  命中盒有效 && canBeCollection && !hologram**。
+  `TowerDefenseGravestoneConfig` 只有 `isChests/blocksPlanting`，**没有**"可否被攻击"开关。
+  **另有"游戏原生已显示血条"的类别要主动跳过**（2026-09-28 用户要求）：**仅限护盾类**——
+  类名含 `Sheild`/`Shield`（`TowerDefenseItemSheild` @ `Item/Sheild`、
+  `TowerDefenseGraveStoneTargetSheild` @ `GraveStone/TargetSheild`）⇒ **不重复显示血量**。
+  **⚠️ 符石类（`RuneStones`/`RuneStonesD`/`RuneStonesDLow`/`RuneStonesLow`）不是护盾，必须显示血量**——
+  它们 `: TowerDefenseGravestone`（墓碑基类）、带 `DamagePointReach` Damage0~4，
+  是完全正常的可攻击障碍物。（2026-09-28 曾误并入跳过名单，被用户纠正"哪来的护盾"。）
+  **兜底原则**：字段/组件取不到时**放行**（宁可多显示，不可静默全拦）。
+- **⚠️ 加速倍率不要读 `character.timeScale`**（2026-09-28 实测定性，推翻旧结论）：
+  它**含"游戏全局快进倍率"**（实测无加成时 8 种植物**恒为 3**），与 buff 相乘会得到离谱值
+  （用户报"毁灭咖啡豆+咖啡三叶草 → +1400%"）。**"植物加速"只读 buff 的 `timeScaleValue` /
+  `FireComponent.timeScale`**；猫窝加速用 **`FireComponent.hasCatPumpkin` +
+  `GetCatPumpkinFireRateScale()==2f`**。综合式（`FireComponent` ~3302 行）：
+  `角色timeScale × buff.GetAttackSpeedMultiplier() × fireAnimeTimeScale ×
+  (num+num/3)/num2 × GetCatPumpkinFireRateScale()`——**注意首项是 character.timeScale，
+  所以整式不能直接当"植物加速"用，必须拆开只取后四项**；
+- **加农炮就绪**：**`CannonComponent.CanFire()`**（公开方法：Alive + Active + runtimeInitialized +
+  canFire + 父节点有效 + 状态机已初始化；**不含目标检测**）；`restTime=30f`/`firstRestTime=3f`；
+- **产出**：`ProduceComponent.produceType`（`"Sun"`/Coin/Packet…）+ `produceInterval`（属性）+
+  `timer` + **`_IZMMode {get;set;}`**（IZM 模式影响计时）；
+- **★ "消失倒计时"有两套计时机制，都要覆盖**（2026-09-28 定案）：
+  ① **`CharacterTimerComponent`**（键值字典，如 `AutoDestroy=15`）——读 timerRunning/WaitTime/Current；
+  ② **Godot 内建 `Timer` 子节点**——如**蜘蛛网 `TowerDefenseBungiTargetSP`**
+     （源码：`lifetime = 15.0` + `new Timer{WaitTime=lifetime}`，Timeout→Destroy）
+     ⇒ **遍历角色子节点找 `Godot.Timer`，读 `TimeLeft`(剩余) / `WaitTime`(总时长)**。
+     限时物件若只查①会漏（这正是"蜘蛛网不显示消失倒计时"的根因）。
+     **全库仅 3 个角色类用 `new Timer`**（2026-09-28 普查）：**蜘蛛网 BungiTargetSP**（自身 15s=存在时长）、
+     **大蒜鸟 GarlicBird**（**挂在僵尸身上**的 5s 特效计时）、**南瓜灯 PumpLantern**（自身 50s 循环=护盾周期）。
+     ⇒ 扫描时"Timer 挂谁身上"要看清（可能挂在别的角色上）。
+     **显示策略（v1.16.0 定稿）**：**僵尸身上的 Timer 一律跳过**（那是外来特效计时）；
+     **南瓜灯 → 标签"护盾"**（50s 周期生成护盾）；其余 → 中性"计时"。
+- **各组件时长字段（已与源码核对一致）**：`GrowUpComponent.timer/growUpReach`、
+  `ChomperComponent.chewTime=30f`、`MagnetComponent.breakDownTime=15f`、
+  `PotatoComponent.readyTime=15f`、`GravebusterComponent.consumeDuration=5f`、
+  `CatapultComponent.fireInterval/fireNum`、`BowlingComponent.maxHitNum`;
 - **血量真身（★2026-09-27 深挖定案）**：**`HurtComponent._damageInstance`**（类型
   `TowerDefenseCharacterInstance` 的实例）的 **`hitpoints`（当前血量）/ `hitpointsBase`（上限）**
   ——**任何时刻可读、与血条显示无关**（障碍物/植物/僵尸通用，HurtComponent 经运行时注册表可取）。
@@ -2499,4 +3007,27 @@ fireComponent.timeScale/attackInterval/动画_timeScale/弹数），**任一变�
    即产物可用 → `cp -f obj → bin` → 直接打包（打包护栏会再核对三方 md5）。
 5. **每次改动向用户汇报时**：版本号 + 三方 md5 一致（bin/包内/装机）+ 缓存清理 + 一条可验证的
    操作指引（"重启后种 XX 看 YY"）——用户逐条核对，含糊的汇报会被打回。
+6. **★ 大目录禁忌（2026-09-28 实测踩坑）**：
+   - ❌ **不要用"回收站 API"（python ctypes `SHFileOperation(FOF_ALLOWUNDO)` / VB `DeleteDirectory`）
+     删大目录**——命令若超时/被中断，**Shell 的删除进程会在后台挂着并锁住目录**（`WinError 32 被占用`），
+     之后 `os.rename`/`shutil.move` 全部失败，而且**无法 kill**（环境禁 `taskkill`）。
+   - ✅ **正确顺序**：**先 `os.rename` 改名（瞬间完成、不加锁）** → 确认无误 → 再删（或交用户手动删）。
+   - 环境限制：`Add-Type`（运行时加载 .NET）被安全策略拦；`taskkill`/`tasklist` 被拦（LOLBin），
+     **查/杀进程只能请用户手动**。
+7. **用户机器的"桌面"可能是重定向目录**（本例是 `C:\Users\txgcs\DesktopNew\`，而 `Desktop\` 是空的）
+   ——**找不到"桌面上的文件"时先 `find` 全盘确认**，别只认 `Desktop`。
+8. **★ 移动/改名大目录用系统 `mv`（秒成）**：同盘 `mv` 走 MoveFileEx、瞬间完成；
+   实测 python `shutil.move`/`os.rename` 在同一场景**会"挂起"**（疑似目录被扫描/句柄占用），
+   换 `mv` 立刻成功。**大目录整理顺序**：用户手动删旧 → `mv` 新目录入位 → `ls` 验证项数。
+9. **改程序集身份名防"同名程序集"冲突（2026-09-28 实测）**：csproj 的 `<AssemblyName>` 默认与
+   项目名一致；各 Mod 若都用默认名（如 `ModAssembly`）可能撞车。**可改身份名**：
+   `<AssemblyName>你的唯一名</AssemblyName>`（如 `JTYHealthCooldownLine`），
+   **但包内文件名仍必须是 `ModAssembly.dll`**——因为 `mod.json.runtimeAssembly` 是**硬编码字面量**
+   `"Runtime/ModAssembly.dll"`，入口文件名不可变。⇒ **打包脚本把产物改名拷进包内 Runtime/**；
+   改后 `BIN` 路径与提示文本要同步。**验证**：扫包内 DLL 字符串——应含新身份名、不含旧名。
+   （注意：这只解决 CLR 层身份撞名；ModLoader 若按"文件名/Mod ID"注册仍可能冲突，需实测。）
+10. **GDRE 新版解包会导出全套 C# 反编译源码**（`解包/*.cs` + `Core/ Script/ Registry/` 等
+   子目录）——**查游戏逻辑/字段语义优先读源码**，比反射探针快且准确
+   （实例：挡弹判据 = `BlockComponent`；猫窝倍率 = `GetCatPumpkinFireRateScale()=2f`；
+   毁灭咖啡豆无 timeScaleValue）。
 
