@@ -113,6 +113,8 @@ RequireReference(manifest, "CharacterSprite", key);   // 查不到 → throw →
 | `Localization/translations.csv` | 翻译（**仅编辑器可见**，见下） | ❌ |
 | `Runtime/ModAssembly.dll` | 托管插件（只有需要时才放） | ❌（但要进 `resources` 列表） |
 
+> ★★★ **包内这个文件名不许改**，但 `.csproj` 的 `<AssemblyName>` **必须 = 本 Mod 的 `<Key>`**（安卓要求主程序集名唯一）⇒ `plant-runtime-plugin.md` §1.1。
+
 ## 11. ⚠️ 翻译表是「编辑器专用」
 
 `ModLoader` 里**一次** `TranslationServer.AddTranslation` 都没有 —— `translations` 清单字段只有编辑器侧

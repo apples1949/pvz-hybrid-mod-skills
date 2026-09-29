@@ -1,6 +1,6 @@
 ---
 name: pvz-hybrid-mod-authoring
-description: 手写/生成《植物大战僵尸杂交版》(Godot 4 + C#) 的 .pmod Mod 包——覆盖内置资源（子弹/地图/角色/关卡/商店/收集物/铲子/推车/生存/教程/NPC对话/BGM/音频/纹理/图集）或做托管代码 Mod。也包含游戏外运行的图形编辑器 mod_editor.py（改数值/打包/校验，免写代码），以及「从单张角色截图制作角色贴图」的抠像 + 逐帧动画流程（透明底、待机/射击、锚点对齐）。当用户要求「做个 Mod」「改游戏资源数值」「覆盖子弹伤害」「打包 pmod」「写 mod.json」「打开 Mod 编辑器」「按这张图做角色贴图」「做待机/射击动画」或提到 .pmod / mod.json / ModLoader / XWModManifest / ModEditor / mod_editor / Mods 目录 / overrides / provides / 角色贴图 / 序列帧 / 图集 / 透明底 时使用。
+description: 手写/生成《植物大战僵尸杂交版》(Godot 4 + C#) 的 .pmod Mod 包——覆盖内置资源（子弹/地图/角色/关卡/商店/收集物/铲子/推车/生存/教程/NPC对话/BGM/音频/纹理/图集）或做托管代码 Mod。也包含游戏外运行的图形编辑器 mod_editor.py（改数值/打包/校验，免写代码），以及「从单张角色截图制作角色贴图」的抠像 + 逐帧动画流程（透明底、待机/射击、锚点对齐）。当用户要求「做个 Mod」「改游戏资源数值」「覆盖子弹伤害」「打包 pmod」「写 mod.json」「打开 Mod 编辑器」「按这张图做角色贴图」「做待机/射击动画」或提到 .pmod / mod.json / ModLoader / XWModManifest / ModEditor / mod_editor / Mods 目录 / overrides / provides / 角色贴图 / 序列帧 / 图集 / 透明底 时使用。也覆盖 **csproj `<AssemblyName>` 与安卓程序集名唯一性 / `runtimeAssembly` 为何必须保持 `Runtime/ModAssembly.dll`** 这类跨平台打包问题。
 agent_created: true
 ---
 
@@ -57,13 +57,45 @@ agent_created: true
 **两份游戏构建各跑一遍**）、`.cache/check_idempotent_*.py`（3 连跑字节稳定 + 增量清理 + 镜像一致），
 以及一个只读收尾核对脚本（`.cache/final_report_*.py`）。
 
+## ★ 交付给用户时的「工作目录 zip」格式（2026-09-28 用户指定）
+
+> 用户说「打包到桌面」时，**要的是把整个 Mod 工程目录 + 技能仓库目录一起压成一个 zip**，
+> 不是只给 `.pmod`，也不是自创 `01_成品/02_源码/03_技能记录/` 分类目录（该做法已被明确否掉）。
+
+参照样本：`C:\Users\txgcs\Downloads\杂交版Mod制作-打包-20260927-v2.zip`
+
+### 顶层结构（每个 Mod 一个目录，平铺）
+
+```
+<ModName>/                        <- 完整工程目录，原样打入（不要拆分类）
+    README.md                     <- 该 Mod 的交付文档（含需求映射/硬约束/已知副作用/未验证项）
+    mod.json
+    build_pmod.py                 <- 构建+打包+安装脚本
+    runtime_src/                  <- 托管代码源码（.cs / .csproj）
+    Runtime/ModAssembly.dll       <- 编译产物
+    build*.log                    <- 历次构建日志（保留，便于追溯）
+    dist/<ModName>.pmod           <- ★ 成品 pmod 放工程内 dist/ 子目录
+pvz-hybrid-mod-skills-main/       <- 技能仓库完整目录（skills/ + tools/ + README）
+```
+
+### 打法要点
+- **源码 = 工程目录自身**（`runtime_src/` 下），不要再另建 `02_源码/`。
+- **技能记录 = 技能仓库目录自身**（`skills/*/SKILL.md`），不要再另建 `03_技能记录/`。
+- **成品 pmod 必须补一份到 `<ModName>/dist/`**（工作区的 `dist/` 常在 `mod/` 母目录，
+  交付时要在各 Mod 目录内补出 `dist/` 才能与参照包一致）。
+- 实现：先 `copytree` 各顶层目录到临时目录（顺便补 `dist/`），
+  再用 `zipfile.ZipFile(tmp, "w", ZIP_DEFLATED)` 按 `relpath` 写入，最后删临时目录。
+- 文件名建议 `杂交版Mod制作-打包-YYYYMMDD-<mod1>-<mod2>.zip`（与参照包命名风格一致）。
+- **输出到用户真实桌面 `C:\Users\txgcs\DesktopNew\`**（不是 `C:\Users\txgcs\Desktop`）。
+
 ## 包结构
 
 ```
 Xxx.pmod                          # zip, ZIP_DEFLATED
 ├── mod.json                      # 必须【根】且【唯一】，≤ 1 MiB
 ├── Resources/Projectiles/A.tres  # 路径前缀决定类别，文件名=key
-└── Runtime/ModAssembly.dll       # 只有托管插件才需要；路径是硬编码字面量，见「托管代码 Mod」节
+└── Runtime/ModAssembly.dll       # 只有托管插件才需要；路径是硬编码字面量（**不许改**），见「托管代码 Mod」节
+                                  #   ⚠️ 但 csproj 的 <AssemblyName> 必须是**本 Mod 自己的键**（安卓要求唯一）
 ```
 
 打包时**排除**：`.uid` `.import` `.cs` `.csproj` `.sln` `.build/` `bin/` `obj/`
@@ -1569,6 +1601,39 @@ insertLayerId = 16
 - `GeneralPlant.Category` 实测只有 6 个键：White178/Gold19/Diamond16/Colour6/Star27/Original20
   （Item/GraveStone/Zombie 在别的卡库）—— 别照 `XWPacketBankVisualResourceEditor.DefaultCategories` 猜。
 
+**★ 与「卡 key 入库」互补的另一条路：运行期「把卡塞进玩家卡槽」（2026-09-28 源码实测）**
+
+想在一局**战斗进行中**白给玩家一张卡，别去动卡库，直接调公开 API：
+
+```csharp
+TowerDefensePacketOverride ov = new TowerDefensePacketOverride();
+ov.cost = 0;                                              // 可改费用 ⇒ 能造"免费卡"
+TowerDefenseManager.Instance.AddPacket("<卡key>", ov);     // 内部：GetSeedBank().AddPacket(config, isStart: true)
+```
+
+* 实现：`Core/TowerDefenseManager/TowerDefenseManager.cs:2810-2826`（`config._override = override_` + `seedBank.AddPacket`）；
+* 先例：`TowerDefensePlantLuckyBlover.Explode()`（钻石幸运四叶草，爆炸时批量给玩家卡）——
+  它同时演示了 `item.Cover(packetConfig, override, keepColddown: false, changePacket: false)` 改已有卡槽 + `item.coldDownTimer = config.GetStartingCooldown()`；
+* 相关读数：`GetSeedBankList()`（`:2828-2836`）、`GetPacketSlotNum()`（`:2795-2808`）、`TowerDefenseManager.Instance.seedbankPacketMax`（卡槽上限）；
+* ⚠️ **有上限 + 会重复**：满槽时先 `Cover()` 覆盖一张再 `AddPacket()`；同一 key 已存在时自己判重，别硬塞；
+* **数据层等价物**：`TowerDefenseCharacterEventCreateAddPacket`
+  （`Resource/TowerDefense/Character/Event/Packet/TowerDefenseCharacterEventCreateAddPacket.cs`，
+  全类只有一个 `[Export] public string packetName`）⇒ 动画事件表里就能配"加卡"，不一定写代码。
+
+**★ 托管插件可订阅的全局事件（`Core/BattleEventBus/BattleEventBus.cs`）**
+
+`BattleEventBus.Instance` 是单例 Node（`PVZApiRegistry.RegisterClass("BattleEventBus", …)` 已注册，托管插件可反射取）。事件清单：
+
+`OnCharacterSpawned` / `OnCharacterDestroy` / `OnCharacterHurt` / `OnColdEffectEmit` / `OnBlowAllEffectEmit` /
+`OnBlowLineEffectEmit` / `OnJalaLineEffectEmit` / `OnJalaRowEffectEmit` / `OnJalaGridEffectEmit` / `OnGameStarted` /
+`OnGameFailed` / `OnGameVictory` / `OnGamePaused(bool)` / `OnWaveStarted(int)` / `OnUiSwitched(bool)` /
+`OnCharacterSkinSwitched` / `OnPacketUIFront(bool)` / `OnShowPlantHealth` / `OnShowZombieHealth` /
+`OnShowBossHealthBar` / `OnScreenTransformChanged`
+
+⇒ **要挂"某个植物/僵尸被生成"就盯 `OnCharacterSpawned`**（比自己每帧扫注册表轻）；回调拿到的是
+`TowerDefenseCharacter`，要自己判 `is TowerDefensePlant`、`packet.saveKey`、`camp` 与格位。
+⇒ **弹自定义全屏 UI 时可参考 `OnGamePaused` / `OnUiSwitched` / `OnPacketUIFront` 的语义**做暂停与让位。
+
 **④ 换掉「投掷车僵尸投出来的单位」**（已实测）：
 `TowerDefenseZombieImppult.ImpSpawn()`（`…/Chapter5/Imppult/Scene/TowerDefenseZombieImppult.cs:135`）
 **硬编码** `GetPacketConfig("ZombieImp")`；`projectileName` 只是美术层名字 ⇒ 只有插件一条路。
@@ -1577,6 +1642,8 @@ insertLayerId = 16
 ### 四条硬约束（写错 = 整包被拒 / 回滚）
 1. `runtimeAssembly` **必须恰好是字面量** `"Runtime/ModAssembly.dll"`（`ModLoader.cs:329-333` +
    `ResolveDeclaredRuntimeAssembly:918`）——写别的路径**硬拒**，`policy` 救不了。
+   ⚠️ 这是**包内物理路径**，**不是**程序集身份 —— 程序集身份另有一条安卓专属协定，
+   见下面 **「★★★ 跨平台（安卓）程序集标识」**（**每个 Mod 的 `.csproj` 都必须写自己的 `<AssemblyName>`**）。
 2. `runtimeApiVersion` **必须恰好 `1`**，否则入口 init 返回 false → **无条件整包回滚**；
    `TryInitializeRuntimeEntry` 失败（`ModLoader.cs:667-671`）同样是**不设防硬拒**，
    连 `policy="optional"` 都保不住 ⇒ 三个回调必须 try/catch。
@@ -1595,8 +1662,100 @@ insertLayerId = 16
 ⇒ `Runtime/` 下只能有 `ModAssembly.dll`。`.pdb` 不在该名单里（会被 `IsDeclaredRuntimeSymbols`
 静默跳过），但既然没用就别放。构建脚本结尾加一条"只允许 ModAssembly.dll"的硬护栏。
 
+### ★ `Runtime/Dependencies/` 是官方预留的「托管依赖」目录（2026-09-28 源码复核）
+上面那条**有一条唯一例外**：`ModLoader.IsRuntimeDependencyFile`（`ModLoader.cs:959-977`，
+被 `ValidateDeclaredPackageExecutables` 的 `:343` 与 `LoadMod` 的 `:534` 两处引用）
+对 `Runtime/Dependencies/<单个文件名>` 放行**任意 `.dll`**（`.pdb` 也放行）；
+判定**只看扩展名、不看内容**，且**文件名里不许再含 `/`**（不递归子目录）。
+并且这个目录是**程序集探测根**——`XWModCharacterCompanionRuntime.cs:72-76` 传给
+`LoadModAssembly` 的 probingRoots 恰是 `[程序集所在目录, 程序集目录/Dependencies]`：
+* **PC**：`ModLoadContext.Load`（`XWModAssemblyLoader.cs:113-142`）先走
+  `AssemblyDependencyResolver`（依赖 `.deps.json`），再逐个 probing root 找 `<AssemblyName.Name>.dll`；
+* **安卓**：`EnumerateAndroidDependencies`（`:259-293`）把该目录下**所有** `*.dll` 先
+  `LoadAndroidAssemblyFile`（`:296-336`）加载进 Default ALC，再加载主程序集。
+
+⇒ **要随包分发托管依赖（第三方库 DLL）就放 `Runtime/Dependencies/`**，别往 `Runtime/` 根塞。
+⚠️ **不要把「原生库」放进去**：安卓路径对目录里每个文件都调
+`AssemblyName.GetAssemblyName(path)`（`:299`），而原生 DLL 不是合法托管程序集 ⇒ 抛
+`BadImageFormatException`，且 `LoadAndroidAssembly`（`:251-255`）**外层没有 try/catch**
+⇒ 推断：**整个 Mod 加载失败**（PC 走 ALC + `ResolvingUnmanagedDll`，不受此条影响）。
+需要原生库时只有两条正路：**限定 PC-only 并自写 `NativeLibrary.Load` / `ResolvingUnmanagedDll` 解析**，
+或换纯托管实现（如把推理降级为不依赖原生库的算法）。
+🚫 **明令禁止**用「把原生库改扩展名混过 `IsExecutablePackageFile`」之类手段规避官方闸门。
+
 `runtimeAssemblyPolicy: "optional"` ⇒ `IsRuntimeAssemblyRequired() == false`
 ⇒ 程序集加载失败**不连坐**整包（新 Mod 建议先 optional）。
+
+### ★★★ 跨平台（安卓）程序集标识：`.csproj` 必须写 `<AssemblyName>`，`mod.json` 保持 `Runtime/ModAssembly.dll`
+
+> **两个名字是两回事，别混。** 安卓的系统 DLL 加载方式与 PC 不同 ⇒ 程序集**身份（AssemblyName）**
+> 必须每个 Mod 唯一；而包内**物理文件名**一字不改。
+
+| 名字 | 写在哪 | 值 | 能改吗 |
+|---|---|---|---|
+| **包内物理路径** | `mod.json` → `runtimeAssembly` | **恰好** `"Runtime/ModAssembly.dll"` | ❌ **一个字都不能改**（硬校验，改 = 整包被拒） |
+| **程序集身份** `AssemblyName` | `.csproj` → `<AssemblyName>` | **本 Mod 的 `<Key>`**（每个 Mod 唯一，如 `SuperGatlingPaper`） | ✅ **必须改成自己的** |
+
+```xml
+<PropertyGroup>
+  <!-- ★ 默认值会给成 ModAssembly（= 包内文件名），安卓上会和别的 Mod 撞车 -->
+  <AssemblyName>SuperGatlingPaper</AssemblyName>
+</PropertyGroup>
+```
+
+**为什么（源码实测）**：
+
+* **PC**：`XWModAssemblyLoader` 走 `:195-197` 的 `ModLoadContext` —— **每个 Mod 一个独立、可回收的 ALC**
+  （`bool flag = !OperatingSystem.IsAndroid()`，`:188`）⇒ 两个都叫 `ModAssembly` 的程序集**互不干扰**，
+  所以这个坑在 Windows 上**永远不暴露**。
+* **安卓**：走 `:191-193` 的 `LoadAndroidAssembly` —— 全 Mod 共享**一个非可回收上下文**。
+  它按**简单程序集名**（`assemblyName.Name`，`OrdinalIgnoreCase`）在静态表
+  `AndroidLoadedAssemblies` 里记账（`:151` / `:299-315`），撞上就
+  `throw BuildAndroidAssemblyConflict(...)`（`:314`，定义在 `:338-341`），原文：
+  > `Android Mod '<id>' cannot load assembly '<requested>'. … Android Mod assemblies share one
+  > non-collectible context, so main assembly names must be unique.`
+  ⇒ **所有 Mod 都叫 `ModAssembly` 时，安卓上第二个 Mod 直接加载失败**（同一个 `AndroidAssemblyLoadLock`
+  `:149` 下排队，先到的赢）。
+* 还有第二条闸（`:316-324`）：程序集名与**当前 AppDomain 里任何已加载程序集**同名（`OrdinalIgnoreCase`）
+  也抛 ⇒ 名字**别撞游戏自己的**（`PlantsVsZombies` / `GodotSharp`）。
+* ⚠️ 允许复用同名的只有**私有依赖**，且要求 identity 与**字节 sha256 全同**（`:308-313`）——
+  **主程序集（`isMainAssembly: true`）一律必须唯一**，没有例外。
+
+**而 `mod.json` 必须**保持 `Runtime/ModAssembly.dll` —— 它是**字面量硬校验**（`ModLoader.cs:330`；另一处 `:918`
+还额外禁 `..`/根路径/`:`）：
+```csharp
+if (!string.IsNullOrWhiteSpace(text) && !text.Equals("Runtime/ModAssembly.dll", StringComparison.Ordinal))
+    throw new InvalidDataException("invalid declared runtime assembly path: " + text);
+```
+⇒ **变的是「程序集身份」，不是「包内文件路径」。** 容器里那个文件**永远叫 `ModAssembly.dll`**。
+
+**构建脚本要跟着改一行**（否则找不到产物；本项目 `build_runtime.py` 现状即为此）：
+```python
+ASSEMBLY_NAME = "SuperGatlingPaper"        # == csproj 的 <AssemblyName> == 本 Mod <Key>
+# 旧：src = os.path.join(out_dir, "ModAssembly.dll")   ← 会在改名后直接报「编译产物里没有 ModAssembly.dll」
+src = os.path.join(out_dir, ASSEMBLY_NAME + ".dll")     # 构建产物：<AssemblyName>.dll
+TARGET_DLL = os.path.join(MOD_DIR, "Runtime", "ModAssembly.dll")   # 装机名：**不变**
+```
+即 **`<AssemblyName>.dll`（`dotnet build` 产物）→ 复制并改名为 `ModAssembly.dll`（打进包）**。
+
+**改名是安全的（为什么不会连带改一堆东西）**：
+* 运行入口按 **`Type.FullName`** 匹配（`XWModCharacterCompanionRuntime.cs:105`）—— **与程序集名无关**；
+* `CompanionOnly` 伴随脚本按 **`type.Name`** 匹配（`:185-186`，名字取自 `mod_character_script_path` 的
+  文件名）—— 也**与程序集名无关**；
+* ⇒ 只需同步**构建脚本的产物名**；`mod.json`、场景 `script`、meta `mod_character_script_path`
+  **一律不动**。
+
+**自检三条（缺一不可）**：
+1. `grep -o '<AssemblyName>[^<]*</AssemblyName>' runtime_src_*/*.csproj`
+   ⇒ **一个 `ModAssembly` 都不许有**，且**两两不重复**；
+2. 装机后 `Runtime/` 下仍**只有一个** `ModAssembly.dll`（`ValidateDeclaredPackageExecutables`，
+   `ModLoader.cs:343-346`）；
+3. 读回程序集身份 == `<Key>`：
+   `AssemblyName.GetAssemblyName("<pmod 解包目录>/Runtime/ModAssembly.dll").Name`。
+
+> ⚠️ **本工坊现状（2026-09-28 实测）**：8 个 `runtime_src_*/*.csproj` **全部**写着
+> `<AssemblyName>ModAssembly</AssemblyName>` ⇒ **安卓上会互相顶掉**。补这一条时要连带把
+> csproj 与 `build_runtime.py` 一起改（改完 DLL 字节变 ⇒ **所有产物指纹都要重刷**）。
 
 ### 入口实现纪律
 - 三个回调 `Initialize(XWModRuntimeContext)` / `OnAllModsLoaded()` / `Shutdown()`
@@ -1613,6 +1772,8 @@ insertLayerId = 16
   `Assets/Textures` 与 `Runtime/` **不在** 72 项里，但放进去不影响加载（只影响编辑器目录骨架）。
 - 编译：`dotnet build -c Release`；**csproj 必须 `<Compile Remove="check_*.cs" />`**，
   否则探针脚本（顶级语句）会被编进库 → CS8805。装机只放 `ModAssembly.dll`，**别带 `.pdb/.deps.json`**。
+  ⚠️ **csproj 还必须写 `<AssemblyName>【本 Mod 的 <Key>】</AssemblyName>`**（安卓要求主程序集名唯一），
+  构建脚本据此取产物 `<AssemblyName>.dll` 再改名为 `ModAssembly.dll` 装机 —— 见上一节「跨平台（安卓）程序集标识」。
 - ⚠️ **每条出错路径各用一个「已报告」标志，不要共用一个**（如 `_tickFaultReported` /
   `_almanacFaultReported` / `_hookFaultReported` / `_volleyFaultReported`）。
   共用时「先报的那条会把后报的静音掉」：图鉴归类失败（只是难看）会把「大招推进失败」
@@ -1625,6 +1786,46 @@ insertLayerId = 16
   读私有字段用**缓存一次的 `FieldInfo`**（`BindingFlags.Instance | NonPublic`），
   拿不到就退化成「不刷新」（最坏：用户翻一次分类），绝不硬调 `InitPlant()`。
   扫描间隔（如 10 帧 ≈ 0.17 s）远小于用户点击延迟 ⇒ 正常路径天然不需要刷新。
+
+### ★★ 托管入口里**不要定义 Node/Control 子类**（2026-09-28 实测踩过大坑）
+
+本工坊所有 `runtime_src_*` 都用 **`Microsoft.NET.Sdk`**（不引 Godot.NET.Sdk，避免联网还原包 + 源码生成器）。
+**代价**：`_Ready` / `_Process` / `_GuiInput` / `_Draw` 这些**虚方法回调不会被引擎调用** ——
+把它们接到引擎上靠的是 Godot 源生成器产出的 `InvokeGodotClassMethod`。
+
+症状极具误导性（实测）：
+```
+[ModLoader] package applied: DrawAndGuessProbe; resources=0; runtimeEntry=True; callbacks=0; diagnostics=0
+[DGProbe] Initialize ok | ...
+[DGProbe] host 已挂到 SceneTree.Root；热键 F8/F9/F10/F11     ← 到这儿全对
+（然后永远没有下文：连节点自己的 _Ready 日志都没出现，按键/绘制全无反应，也没有任何 EXC）
+```
+
+**正确写法 = 普通节点实例 + `SceneTree.ProcessFrame` 轮询**：
+
+| 需求 | 不要用 | 改用 |
+|---|---|---|
+| 每帧驱动 | `_Process` | `tree.ProcessFrame += OnFrame`（引擎类型的 C# 事件；`Shutdown` 里记得 `-=`） |
+| 键盘 | `_Input` | 每帧 `Input.IsKeyPressed(Key.F8)` 做边沿检测。**顺带把 F5~F12 全记一遍日志** —— 能立刻分辨「键被游戏吃掉」还是「回调根本没跑」 |
+| 鼠标 | `_GuiInput` | 每帧 `Input.IsMouseButtonPressed(MouseButton.Left)` + 命中判定自己算 |
+| 鼠标坐标 | `Input.GetMousePosition()`（**Godot 4 没这个 API**，会 CS0117） | `viewport.GetMousePosition()`，例如 `tree.Root.GetMousePosition()` |
+| 绘制 | `_Draw` | 维护一张 `Image` → `ImageTexture.Update()` → 赋给普通 `TextureRect.Texture` |
+| 建 UI | — | 照旧 `new CanvasLayer()` / `new TextureRect()` / `new Label()` 都正常（**内置类型由引擎注册**，不需要源生成器） |
+
+**仍然可用**（都是引擎类型上的成员，不依赖源生成器）：
+`SceneTree.Paused`、`Callable.From(...).CallDeferred()`、`Engine.*`、`ResourceLoader`、`Image`/`ImageTexture`、
+`SubViewport`、以及游戏程序集里的公开类型与方法。
+
+> 对照：游戏自己的角色脚本（如 `TowerDefensePlantCubeBox`）可以正常用 `_Ready`/`CallDeferred` ——
+> 因为那些是**游戏工程内**的脚本类，编译时有源生成器。别把结论套到游戏侧代码上。
+
+**两条同批踩到的打包/安装坑**：
+1. **zip 幂等要固定时间戳**：用 `zipfile.ZipInfo(name, date_time=(1980,1,1,0,0,0))` 写入，
+   否则每次打包字节都不同（写入时间戳会变），"内容相同就不重写"的判断**永远失效**。
+2. **换包后游戏可能复用旧解包目录**：`user://ModsCache/<id>-<hash>/` 里若仍是旧 DLL，新代码不生效。
+   把该目录**改名**（如加 `_stale_` 前缀，可逆、别删）即可强制重新解包。
+   另外游戏会把包规范化复制成 `mods/<id>-<hash>.pmod` —— 换版本时**这一份也要一起更新**，
+   否则可能读的是它而不是你手放的那个包。
 
 ### 不开游戏怎么验（本机可行）
 用 `dotnet run --file x.cs` 跑探针，**反射直调游戏程序集里的真函数**（不启动 Godot）：
@@ -1757,6 +1958,8 @@ bool ok = (bool)sanitize.Invoke(null, new object[] { null, rel, abs, strip });
 
 **共享程序集做不到**：每个 `.pmod` 都必须自带路径**恰好**为 `Runtime/ModAssembly.dll` 的程序集，
 且两版 `runtimeEntryType` 不同（数字签名/类名都不同）⇒ 结构上没法共用一个 DLL。
+（注意：**包内文件名**都是 `ModAssembly.dll`，但两版的 **`<AssemblyName>` 程序集身份必须不同**
+—— 这正是安卓能容忍「同名文件」却容忍不了「同名程序集」的原因，见前面「跨平台（安卓）程序集标识」节。）
 
 **做法：共享源文件（single source of truth）**
 
@@ -2858,4 +3061,270 @@ fireComponent.timeScale/attackInterval/动画_timeScale/弹数），**任一变�
    子目录）——**查游戏逻辑/字段语义优先读源码**，比反射探针快且准确
    （实例：挡弹判据 = `BlockComponent`；猫窝倍率 = `GetCatPumpkinFireRateScale()=2f`；
    毁灭咖啡豆无 timeScaleValue）。
+11. **★ 清 `ModsCache` 别用 Python 的 `os.rename` / `shutil.move`**（2026-09-29 复现）：
+    在大目录上会**挂起**（目录被句柄占用 / 被杀毒扫描），实测**卡死 5 分钟零输出**。
+    ✅ 改用 `subprocess.run(["cmd", "/c", "move", src, dst], timeout=60)`
+       （同盘走 `MoveFileEx`，瞬间完成）；或让用户手动处理。
+    附带两条纪律：
+    · **打包/装机脚本的日志要"每条实时落盘"** —— 只在最后统一写盘的话，挂住时什么都看不到；
+    · 改名目标名要**带时间戳 + 撞名递增序号**，否则第二次跑就撞 `WinError 183` 中断。
+12. **⛔ 包内「绝不能」出现 `.cs`（本版引擎实测会被拒包）**：    `ModLoader.IsExecutablePackageFile`（`ModLoader.cs:1316`）的扩展名白名单 =
+    **`.dll` / `.gd` / `.cs` / `.bat` / `.exe` / `.cmd` / `.ps1`**
+    ⇒ 包内出现任何一个（且不是 `runtimeAssembly` 指定的那个）都会在 `ValidatePackageArchive`
+      里被判 `undeclared executable package file` ⇒ **整包拒收**，游戏弹「Mod 诊断」窗口。
+    ⚠️ **2026-09-29 我（AI）误读了这个方法**：把相邻的 `IsRuntimeDependencyFile`（只认
+       `Runtime/Dependencies/` 下的 `.dll`/`.pdb`）当成了它，据此做了一个含 `.cs` 的包
+       （v1.0.7），**实机被拒**。⇒ **判据要认准方法名，别拿相邻方法的实现当结论；
+       也不要拿旧版行为推断本版**（技能里"旧版只认 dll/pdb"的说法已作废）。
+    ⚠️⚠️ **更值得记的教训**：本条结论**本来就在本文件第 88 行写着**
+       （"`.cs` 被排除、但 `IsExecutablePackageFile` **认**它 ⇒ 包内绝不能有 `.cs`"）——
+       我在动手前**没有先搜技能**，而是直接去读源码、还读错了方法，**用错误的新知推翻了
+       已有的正确结论**。
+       ⇒ **改规范/推翻既有结论前，先 `grep` 一遍技能里有没有现成答案**；
+         有冲突时，先怀疑自己，再去核对源码。
+    ⇒ 相关：Mod 角色的 CompanionOnly「声明文件」**不能**用 `.cs`，
+      要把 `mod_character_script_path` 指向**场景文件自己**（`./<Key>.tscn`）
+      —— 引擎只做 `Path.GetFileNameWithoutExtension()`，**不读文件内容**。
+13. **★ Mod 自己做输入轮询时，必须与「原生控件路径」互斥**（2026-09-29 实测）：
+    给**自绘按钮**做"暂停兜底轮询"（`Input.IsMouseButtonPressed` + 矩形命中 + 切换）之后，
+    若又把 UI 换成**原生控件**（`CheckBox` / `Button`，且已设 `ProcessMode = Always`
+    让它在暂停时也能收 GUI）⇒ **两条路径会各触发一次**，表现为**一次点击切换两次**
+    （长按 / 连点时抖动成"开→关→开"）。
+    ⇒ **二选一**：要么只用原生控件（靠 GUI 派发），要么只用自绘 + 轮询；
+      若要同时支持两种形态，**必须在轮询入口用开关 `return` 掉**。
+14. **★ 用「状态边沿」识别玩家操作时，必须叠加「确有输入事件」的约束**：
+    想捕捉"玩家刚点了哪张卡"，容易先想到监听某个状态字段的 false→true 边沿。
+    但**游戏自己也会批量改这些状态**（实测：进关卡时按预设卡组恢复 `select = true`），
+    会被误判成玩家操作 —— 一帧内连刷 3 条"玩家刚点选"，还把记录覆盖成错误的那张。
+    ⇒ 边沿检测**必须再叠加"鼠标刚按下那一帧"**（`down && !prevDown`）：
+      玩家操作必伴随输入事件，程序批量改状态不会有。
+15. **★ 还原「被替换前的原对象」优先用固有锚点，别自己缓存**：
+    把 A 的 config 换成 B 后想"取消时还原回 A"，不必额外存原对象 ——
+    `TowerDefenseInGamePacketShow.originalSaveKey` 在首次 `Init()` 时就被固化成 A 的 key，
+    **替换过程中不会变**，反查即可。
+    ⚠️ 反查回来的全局 config **仍要 `Duplicate()` 再传给 `Cover()`**（它会就地改传入对象）。
 
+---
+
+## ★★ 暂停（`SceneTree.Paused`）期间的输入与 GUI —— 时停类 Mod 全程沉淀（2026-09-29 定案）
+
+做"暂停战场但仍要能操作"的 Mod（时停 / 子弹时间 / 暂停菜单）时，**这一节能省 5 轮返工**。
+下面三个是**互相独立**的真因，任缺一个都会让"暂停期间点卡 / 铲子 / 种植物"完全失效；
+前两轮我（v1.0.7~1.0.11）反复在"保活 ProcessMode"上打转，全错。
+
+### 真因 1：命中判定的坐标系 —— **两个坑，先后踩了两次**
+
+```csharp
+// ❌ 坑 1：两个量根本不同坐标系，恒 false
+ctl.GetGlobalRect().HasPoint(viewport.GetMousePosition())
+//   `Control::get_global_rect()` = Rect2(get_global_position(), size)，而
+//   `get_global_position()` 只含祖先 Node2D/Control 的 transform，
+//   **不含 viewport 的 canvas transform**（只有 with_canvas 那版才含）；
+//   而 GetMousePosition() 是窗口像素坐标。UI 挂在带缩放的 CanvasLayer 下时差一个量级。
+
+// ❌ 坑 2（v1.0.14 加进去、v1.0.15 才实测发现）：Rect2 含 position！
+ctl.GetRect().HasPoint(ctl.GetLocalMousePosition())
+//   `Control::get_rect()` 的实现是 `Rect2(get_position(), get_size())`
+//   —— **含控件在父容器里的 position**；而 `get_local_mouse_position()` 是
+//   `get_global_transform_with_canvas().affine_inverse() * viewport_mouse`，
+//   **控件自身坐标系**（原点 = 控件左上角）。两者原点不同 ⇒ 恒 false。
+//   实测证据：`localMouse=(50.72815, 50.991257)` 明明落在 94x60 内，
+//   hit 却是 False —— 因为 rect 的 y 起点是它在 VFlowContainer 里的槽位偏移（≈62）。
+
+// ✅ 唯一正确写法（局部坐标 vs 零原点 rect）
+new Rect2(Vector2.Zero, ctl.Size).HasPoint(ctl.GetLocalMousePosition())
+```
+
+**教训**：用"两个都得来自同一坐标系"来校验你的命中判定 ——
+`GetLocalMousePosition()` 配 `Rect2(Vector2.Zero, Size)`；
+若要配 `GetRect()`，鼠标必须换成**含 position 的同一父坐标系**的量。
+
+**调试这类问题的正确姿势**：把 `localMouse` 和 `rect` **一起打出来**，
+一眼就能看出"明明在 rect 里为什么还是 false"。
+（本次就是靠这一行日志定案的。）
+
+### 真因 2：`Input.IsMouseButtonPressed` 是「按住」语义 ⇒ 切换型接口被调偶数次 = 无变化
+
+```csharp
+// ❌ 错：鼠标按住 0.2s ≈ 12 帧 ⇒ 触发 12 次
+if (!Input.IsMouseButtonPressed(MouseButton.Left)) return;
+packetShow.Pressed();          // 内部是 select = !select（切换！）
+```
+
+12 次切换 = 翻转偶数次 ⇒ **回到原样**，表现就是"点了完全没反应"。
+雪上加霜的是：为了绕开"暂停时防抖位不递减"，我还在**每帧**清 `_pressDelayTimer = 0`
+—— 把游戏自带的 0.2s 防抖（唯一的安全网）亲手拆了。
+
+**修法：改成边沿触发 + 双路冗余**
+1. 本地轮询边沿：`bool edge = down && !_prevMouseDown; _prevMouseDown = down;`
+2. `_Input(InputEvent)` 捕获 `InputEventMouseButton { ButtonIndex == Left, Pressed == true }`
+   （事件天然是边沿；`ProcessMode = Always` 的节点在暂停时仍会收到 `_Input`）。
+3. 帧去重（`_lastPickClickFrame`）保证同帧只消费一次。
+4. **防抖位只在"即将触发动作前"清一次**，不要每帧清。
+
+### 真因 3：落点入口 `ProcessInput()` 无人驱动 + `IsActionJustPressed` 的帧时机
+
+**调用链（必须记住）**：
+```
+TowerDefenseMapControl._PhysicsProcess()          ← Node2D，ProcessMode 继承根 = Pausable
+    └─ if (!isGameRunning && !isGameFail) mapFeature.ProcessInput()
+           └─ TowerDefenseBattleFeatureMap.ProcessInput()      ← 唯一入口（战斗种植/铲除都在这里）
+                  ├─ packetPickControl.ProcessPacketPick(cell, gridPos, mousePos)
+                  ├─ packetPickControl.ProcessTools(...)
+                  └─ packetPickControl.ProcessReleaseInput(mousePos)
+```
+⇒ 暂停时 `TowerDefenseMapControl._PhysicsProcess` **不跑** ⇒ `ProcessInput` 永不执行 ⇒ 种不下去。
+（`TowerDefenseControlNew._Input → process.InputProcess()` **不管种植**，只管波次调试/视图返回，别找错门。）
+
+**修法**：Mod 自己每帧直调 `mapFeature.ProcessInput()`，并反射重置去重位：
+```csharp
+SetMember(mapFeature, "_lastInputPhysicsFrame", ulong.MaxValue);   // 绕过帧去重
+InvokeMethod(mapFeature, "ProcessInput");
+```
+✅ `ProcessInput` 是 **public**，且 `TowerDefenseManager.GetMapFeature()` 能直接拿到（是 GodotObject，非 Node）。
+
+**⚠️ 时机细节**：`ProcessInput` 判"确认种植"走
+`mapControl.IsConfirmInput()` = `Input.IsActionJustPressed("Press")`。
+该 API 在**物理帧**里比较 `pressed_physics_frame == Engine.get_physics_frames()`，
+放到"下一物理帧"再调可能因帧号已推进而判 false。
+⇒ **在 relay 的 `_Input` 回调里收到左键按下时立刻再调一次 `DrivePlanting()`**
+（`_Input` 回调里 `Input` 状态刚被本事件更新 ⇒ `IsActionJustPressed` 必为 true）。
+物理帧里照旧每帧调一次，两者并存无害（种下后 `packetPick` 会被清空，不会重复种）。
+
+**诊断纪律**：`PLANT#N ppc= picked= needs= confirm= phys= paused=` 逐项打出来，
+一眼看出是"没选中"还是"确认判 false"。（`PacketPickControl.NeedsInputProcessing()`：
+`!IsPicking() && !_wasPicking` 时返回 `_toolActivateGrace > 0`，否则 true。）
+
+### 编译环境：`dotnet build` 卡死（NuGet restore + 沙箱 TEMP）
+
+**症状**：`dotnet.exe` 占 170MB+、**日志空、DLL 不更新、3 分钟以上无输出**。
+与"MSBuild 节点残留锁目录"**症状相同但根因不同**——别只想着杀进程。
+
+**两条必须同时做**：
+1. **`--no-restore`**（`obj/project.assets.json` 已存在时跳过 NuGet restore）——本次卡死的**主因**；
+2. `TEMP` / `TMP` / `TMPDIR` / `DOTNET_CLI_HOME` / `NUGET_PACKAGES` **全部重定向到工作区内**，
+   规避沙箱对 `%TEMP%` / `%USERPROFILE%\.nuget` 的拦截。
+3. 另：先 `taskkill /F /IM dotnet.exe` 清残留（旧进程锁 `obj/` 也会卡）。
+
+加上这两条后编译 **19 秒**成功（此前 3 分钟无输出）。可复用脚本见
+`mod/TimeStop/build_and_install.py`（编译 → 打包 → 装机 → 清缓存一条龙）。
+
+### Godot 4 C# API 速查（本次编译报错踩到的）
+
+| 想用 | Godot 4 C# 实际 |
+|---|---|
+| `Transform2D.Xform(v)` | ❌ 不存在（Godot 3 的名字）⇒ 用 `xf * v` |
+| `CanvasLayer.GetCanvasTransform()` | ❌ 不存在 ⇒ 只有 `CanvasItem.GetCanvasTransform()` |
+| 鼠标在控件局部坐标 | ✅ `Control.GetLocalMousePosition()` |
+| 鼠标在某 CanvasItem 的 canvas 坐标 | ✅ `CanvasItem.GetGlobalMousePosition()` |
+| 控件在窗口坐标的矩形 | 自己算：`xf = ctl.GetGlobalTransformWithCanvas(); xf * Vector2.Zero` / `xf * ctl.Size` |
+| 诊断输出不被 Mod 日志开关吞 | `GD.Print(...)`（区别于受门控的自建 `Info()`） |
+
+### ★★★ 铁律：手写 csproj 的 Mod 里，自定义 `Node` 子类的回调**不会被引擎调用**（2026-09-29 定案）
+
+**症状**：Mod 逻辑"看起来挂上了"，但**一行日志都没有**、功能全不生效。
+
+**根因**：Mod 程序集为了避开联网还原，通常**手写 `.csproj`**（只 `Reference` 两个 DLL，
+不用 `Godot.NET.Sdk`）⇒ **没有 Godot 的源码生成器**。
+Godot 4 的 C# 脚本必须由源码生成器注册虚方法表
+（`InvokeGodotClassMethod` / `GetGodotClassPropertyList` / `_GetGodotMethodList` …）；
+**没有生成器时，引擎根本不知道你的类有哪些虚方法** ⇒
+`_Ready` / `_Process` / `_PhysicsProcess` / `_Input` / `_GuiInput` **永远不会被调用**，
+而且**完全静默**（不报错、不告警）。
+
+**哪些能用、哪些不能用**：
+
+| 形态 | 是否被调用 | 原因 |
+|---|---|---|
+| `Initialize` / `OnAllModsLoaded` / `Shutdown` | ✅ | ModLoader **反射**调用入口类，不走 Godot 虚方法表 |
+| `Callable.From(Action)` + `SceneTree.Connect("process_frame"/"physics_frame", …)` | ✅ | **信号**通道，运行时构造，不需要生成器 |
+| `SceneTree.Connect` 到**游戏节点**的 C# event / Godot signal | ✅ | 同上 |
+| 给**游戏原生节点**设 `ProcessMode = Always` | ✅ | 游戏程序集自己有生成器 |
+| **你自己的 `Node`/`Control` 子类** 的 `_Process`/`_PhysicsProcess`/`_Input`/`_Ready` | ❌ **静默失效** | 无生成器 ⇒ 引擎不认识 |
+
+**⇒ 结论：Mod 里想"每帧跑点什么"，一律用信号，不要靠自定义节点的 `_Process`。**
+
+```csharp
+// ✅ 唯一可靠写法
+_tick = Callable.From(new Action(OnProcessFrame));
+_tree.Connect("process_frame", _tick);
+_phys = Callable.From(new Action(OnPhysicsFrame));
+_tree.Connect("physics_frame", _phys);      // ★ 暂停时照样发
+// Shutdown 里记得两处都 Disconnect
+```
+
+**`physics_frame` / `process_frame` 在 `paused` 时依然发**：
+`SceneTree::physics_process()` 先 `emit_signal("physics_frame")`，之后才做受 `paused` 门控的
+`_process(true)`；`Main::iteration()` 无条件调 `physics_process()`。
+`SceneTree::process()` 同理先 emit `process_frame`。
+
+**排查这类问题的方法论**（本次靠它定案）：
+1. 在**每个可能的入口**都打一条**心跳**日志（`GD.Print` 直出，别用受门控的自封装 `Info()`）；
+2. 跑一次游戏，`grep` 心跳 —— **哪条没出现，就是哪条通道断了**；
+3. 本次实证：`process_frame` 的心跳有、`relay._PhysicsProcess` 的心跳**一条没有** ⇒ 立刻锁定。
+
+⚠️ **别被"看起来运行了"骗到**：`AddChild` 成功、`IsInstanceValid` 为真、节点在树里
+—— **都不代表它的回调会被调用**。唯一判据是**日志里有没有它打的行**。
+
+### 同节：命中判定与"按住"语义（时停 Mod 实测，两个独立 bug）
+
+1. **`Control` 命中判定**（三种写法，**只有最后一种对**）：
+   ```csharp
+   ctl.GetGlobalRect().HasPoint(viewport.GetMousePosition())                 // ❌ 跨坐标系
+   ctl.GetRect().HasPoint(ctl.GetLocalMousePosition())                       // ❌ rect 含 position
+   new Rect2(Vector2.Zero, ctl.Size).HasPoint(ctl.GetLocalMousePosition())   // ✅
+   ```
+   ⛔ `CanvasLayer` **没有** `GetCanvasTransform()`（只有 `CanvasItem` 有）。
+
+2. **`Input.IsMouseButtonPressed` 是"按住"语义**：拿它当"点击"会在一秒内触发十几次；
+   若目标接口是**切换型**（如 `Pressed()` 里的 `select = !select`），翻转偶数次 = **回到原样** ⇒
+   表现为"点了完全没反应"。⇒ 必须做**边沿检测**（`down && !prevDown`）。
+
+
+### ★★★ 铁律 20：改卡槽卡的 `config.saveKey` 必须同步管 `seedBank.packetNameSet`（2026-09-29 模仿者 Mod 定案）
+
+**症状**：卡能加进卡槽一次，删掉后就**再也加不回来**（点卡池那张完全没反应）；
+表现为"无法模仿 X""无法再选"。
+
+**根因链**（`Registry/Battle/Feature/SeedBank/Control/TowerDefenseInGameSeedBank.cs`）：
+```
+AddPacket()    → packetNameSet[config.saveKey] = true      // 键 = saveKey
+DeletePacket() → packetNameSet.Remove(_packet.config.saveKey)  // 也用 saveKey
+```
+而 Mod 若用 `Cover(newCfg)` 把那张卡的 `config.saveKey` 换成别的（例如"模仿者卡显示成被模仿植物"），
+`AddPacket` 塞进去的旧键 **永远不会再被 Remove** ⇒ `HasPacket(旧键)` 恒 true
+⇒ `TowerDefenseBattleFeaturePacketBank.BindVirtualizedPacket()` 里
+   `packet.alive = !seedBank.HasPacket(saveKey)` 恒 **false**
+⇒ `PacketChoose()` 加卡分支 `if (!packet.alive || !seedBank.CanAddPacket()) { packet.Reset(); return; }`
+   **直接拒绝入槽**。
+连带：真植物的键被 `Remove` 掉 → `HasPacket(真植物)` 恒 false → 卡池那张 `alive` 恒 true → 可能重复加卡。
+
+**修法（推荐，最稳）**：每帧按"**身份键**"重建 `packetNameSet`。游戏自己判定卡身份用的是
+`originalSaveKey`（非空时）否则 `config.saveKey`（见 `FindSelectedPacket()` / `DeletePacket()` /
+`EmitChooseOverAsync()`），所以重建必须用同一口径：
+```csharp
+Godot.Collections.Dictionary pns = seedBank.packetNameSet;   // public Dictionary
+pns.Clear();
+foreach (var c in seedBank.packetList) {
+    if (c == null || !GodotObject.IsInstanceValid(c)) continue;
+    var cf = c.config; if (cf == null || !GodotObject.IsInstanceValid(cf)) continue;
+    string idKey = string.IsNullOrEmpty(c.originalSaveKey) ? cf.saveKey : c.originalSaveKey;
+    pns[idKey] = true;
+}
+```
+⚠️ `Godot.Collections.Dictionary` **不是 `GodotObject`**，`IsInstanceValid(pns)` 直接 CS1503。
+
+**其他配套**：
+- 卡槽卡走**对象池**（`ReturnPacketToPool` → `ResetForPool()` 会清 `originalSaveKey`/事件/精灵）
+  ⇒ Mod 侧按 `GetInstanceId()` 存的"这张卡上次显示成什么"**必须**在该卡离开
+  `seedBank.packetList` 时清掉，否则节点复用后旧值会造成误判/误触发。
+- `DeletePacket()` 会改 `packetList` ⇒ **绝不能在 `foreach (seedBank.packetList)` 里调它**，
+  要先收集、遍历结束后统一删。
+- "选卡阶段 vs 战斗期"用 `seedBank.hasGameStarted` 区分。战斗期别做"卡消失就删"这类联动：
+  `plantOnce` 的卡被 `QueueFree()` 后**仍留在 `packetList`**，`IsInstanceValid` 为 false
+  会被误判成"不在卡槽"而误删别的卡。
+- "卡槽(已选区) vs 卡池(待选区)"的判定用 **`seedBank.packetList` 成员关系**（HashSet<instanceId>），
+  **别用 `originalSaveKey`** —— 卡池那张同名 Mod 卡的 `originalSaveKey` 也是同一个值。
+- `select` 只是**卡面选中框**开关（`Pressed()` 里 `select = !select`），**不代表"已入卡槽"**：
+  `PacketListChoose()`（「重新选卡」按钮）/ `PacketChooseFromName()`（关卡预设）都不经过 `Pressed()`。
+  "最后选择的植物"的正确来源是 **`seedBank.packetList` 的顺序**（`AddPacket` 追加、`DeletePacket` 移除）。

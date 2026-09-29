@@ -23,7 +23,8 @@
 
 ## 2. 经典 reanim → 重置版直转（首选路线）
 
-`Asset/Anime/Character/**/*.reanim.compiled` 是经典版的逐帧数据；重置版用 `.dat` + 图集。
+经典版的逐帧数据是 `*.reanim.compiled`（**本机在 `D:\zzz\extract_1789988101\compiled\new\`，实测 620 个**；
+⚠️ **V0.28 重置版解包树里 0 个**，别去那儿找）。重置版用 `.dat` + 图集。
 转换要点（全部由「内置同角色双引擎对照」反推 + 数值验证）：
 
 1. 解析 `.reanim.compiled`（二进制，含轨道/变换/帧序列）；

@@ -18,6 +18,7 @@
 | 10 | `Resources/Characters/Zombies/<Key>/Armor/Config/Zombie<Key>Armor<X>.tres` | 护具槽 | 护具没血/秒不掉 |
 | 11 | `Resources/Animations/<Skin>.{dat,tres,Atlas.png}` | 外观三件套 | 换外观时才有 |
 | 12 | `Runtime/ModAssembly.dll` | 托管插件 | 机制全无 |
+| 12b | `.csproj` 的 `<AssemblyName>`（**不在包内**） | 程序集身份，**必须 = 本 Mod 的 `<Key>`** | 安卓上多 Mod 互相顶掉 ⇒ 整包加载失败（§5.1） |
 | 13 | `<中文名>.pvzmodeproject` | 工程标记 | **不进包**（zip 里出现 = 被拒/污染） |
 
 包内**禁止**：`.cs` / `.scn` / `.res` / `.uid` / dotfile。
@@ -81,6 +82,65 @@
 ⚠️ `Runtime/ModAssembly.dll` 必须**同时**出现在 `manifest.resources` 里，且遵守 `SyncProject` 的
 规范序（`OrdinalIgnoreCase` 升序 ⇒ `Resources/…` 在前、`Runtime/…` 在后），
 否则编辑器一打开工程就会重写 `mod.json`。
+
+### 5.1 ★★★ 跨平台（安卓）程序集标识：`.csproj` 必须写 `<AssemblyName>`，`mod.json` 一个字母都不改
+
+> 安卓的系统 DLL 加载方式与 PC **不同** ⇒ **程序集身份**（`AssemblyName`）必须每个 Mod 唯一；
+> 而包内**物理文件名**（`runtimeAssembly`）**一字不改**。**两个名字是两回事。**
+
+| 名字 | 写在哪 | 值 | 能改吗 |
+|---|---|---|---|
+| **包内物理路径** | `mod.json` → `runtimeAssembly` | **恰好** `"Runtime/ModAssembly.dll"` | ❌ 硬校验，改 = **整包被拒** |
+| **程序集身份** `AssemblyName` | `.csproj` → `<AssemblyName>` | **本 Mod 的 `<Key>`**，如 `SuperGatlingPaper` | ✅ **必须改成自己的** |
+
+```xml
+<PropertyGroup>
+  <!-- ★ 默认/照抄会给成 ModAssembly（= 包内文件名），安卓上会和别的 Mod 撞车 -->
+  <AssemblyName>SuperGatlingPaper</AssemblyName>
+</PropertyGroup>
+```
+
+**为什么（源码实测，`addons/ModEditor/ScriptEditor/Compiler/XWModAssemblyLoader.cs`）**：
+
+* **PC**：走 `:195-197` 的 `ModLoadContext`（`:188 bool flag = !OperatingSystem.IsAndroid();`）
+  —— **每个 Mod 一个独立可回收 ALC** ⇒ 两个都叫 `ModAssembly` 的程序集互不干扰，
+  所以这个坑在 Windows 上**永远不暴露**。
+* **安卓**：走 `:191-193` 的 `LoadAndroidAssembly` —— 全 Mod 共享**一个非可回收上下文**。
+  它按**简单程序集名**（`assemblyName.Name`，`OrdinalIgnoreCase`）在静态表 `AndroidLoadedAssemblies`
+  （`:151`）里记账（`:299-315`），撞上就 `throw BuildAndroidAssemblyConflict(...)`
+  （`:314`，定义 `:338-341`）：
+  > `Android Mod '<id>' cannot load assembly '<requested>'. … Android Mod assemblies share one
+  > non-collectible context, so **main assembly names must be unique**.`
+  ⇒ **所有 Mod 都叫 `ModAssembly` 时，安卓上第二个 Mod 直接加载失败**。
+* 第二条闸（`:316-324`）：与**当前 AppDomain 里任何已加载程序集**同名（`OrdinalIgnoreCase`）也抛
+  ⇒ 名字别撞游戏自己的（`PlantsVsZombies` / `GodotSharp`）。
+* 只有**私有依赖**才允许跨 Mod 同名，且要 identity + **字节 sha256 全同**（`:308-313`）；
+  **主程序集（`isMainAssembly: true`）一律必须唯一**。
+
+**而 `mod.json` 必须**保持 `Runtime/ModAssembly.dll` —— 字面量硬校验（`ModLoader.cs:330`：
+`!text.Equals("Runtime/ModAssembly.dll", StringComparison.Ordinal)` ⇒ `InvalidDataException`；
+`:918` 还额外禁 `..`/根路径/`:`）。⇒ **容器里那个文件永远叫 `ModAssembly.dll`。**
+
+**构建脚本跟着改一行**（否则报「编译产物里没有 ModAssembly.dll」）：
+```python
+ASSEMBLY_NAME = "SuperGatlingPaper"                     # == csproj <AssemblyName> == 本 Mod <Key>
+src = os.path.join(out_dir, ASSEMBLY_NAME + ".dll")     # 构建产物：<AssemblyName>.dll
+TARGET_DLL = os.path.join(MOD_DIR, "Runtime", "ModAssembly.dll")   # 装机名：**不变**
+```
+
+**改名安全（不会牵连别处）**：入口按 **`Type.FullName`** 匹配
+（`XWModCharacterCompanionRuntime.cs:105`）、`CompanionOnly` 伴随脚本按 **`type.Name`** 匹配
+（`:185-186`）—— **两者都与程序集名无关** ⇒ 只改 csproj 的 `<AssemblyName>` + 构建脚本取产物名，
+`mod.json` / 场景 `script` / meta `mod_character_script_path` **一律不动**。
+
+**自检三条（缺一不可）**：
+1. `grep -o '<AssemblyName>[^<]*</AssemblyName>' runtime_src_*/*.csproj` ⇒ **一个 `ModAssembly` 都不许有**，且两两不重复；
+2. 装机后 `Runtime/` 下仍**只有一个** `ModAssembly.dll`（`ValidateDeclaredPackageExecutables`，`ModLoader.cs:343-346`）；
+3. 读回身份 == `<Key>`：`AssemblyName.GetAssemblyName("…/Runtime/ModAssembly.dll").Name`。
+
+> ⚠️ **本工坊现状（2026-09-28 实测）**：8 个 `runtime_src_*/*.csproj` **全部**写着
+> `<AssemblyName>ModAssembly</AssemblyName>` ⇒ **安卓上互相顶掉**。补这一条要连带改
+> csproj + `build_runtime.py`；**改完 DLL 字节会变 ⇒ 所有产物 sha256 指纹都得重刷**。
 
 ## 6. 闸门体系（离线全套）
 

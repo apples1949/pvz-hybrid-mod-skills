@@ -1,6 +1,6 @@
 ---
 name: pvz-hybrid-plant-authoring
-description: 为《植物大战僵尸杂交版》(Godot 4 + C#) 从零制作或改造一个「植物」Mod 的端到端流程——建包、写植物配置与卡片、让卡进选卡界面与图鉴、调发射（射速/弹数/散射/动画事件表）、换外观（经典 reanim 官方素材直转或自制逐帧）、必要时写托管 C# 插件做概率/连射/真随机/修「动画静止」，以及全套离线闸门与实机验收。当用户要求「做一个植物 Mod」「加个新植物」「改某植物的射速/伤害/血量/费用/冷却」「让它进图鉴/能在选卡里选到」「换植物贴图或动画」「植物打不出子弹」「植物动画不动/暂停才跳帧」「植物种不到空地」或提到 TowerDefensePlantConfig / TowerDefensePacketConfig / ComponentSet / FireComponent / FireComponentFireProjectileConfig / CharacterSprite / build_plant_*.py / 植物 .pmod 时使用。
+description: 为《植物大战僵尸杂交版》(Godot 4 + C#) 从零制作或改造一个「植物」Mod 的端到端流程——建包、写植物配置与卡片、让卡进选卡界面与图鉴、调发射（射速/弹数/散射/动画事件表）、换外观（经典 reanim 官方素材直转或自制逐帧）、必要时写托管 C# 插件做概率/连射/真随机/修「动画静止」，以及全套离线闸门与实机验收。当用户要求「做一个植物 Mod」「加个新植物」「改某植物的射速/伤害/血量/费用/冷却」「让它进图鉴/能在选卡里选到」「换植物贴图或动画」「植物打不出子弹」「植物动画不动/暂停才跳帧」「植物种不到空地」或提到 TowerDefensePlantConfig / TowerDefensePacketConfig / ComponentSet / FireComponent / FireComponentFireProjectileConfig / CharacterSprite / build_plant_*.py / **csproj `<AssemblyName>` / 程序集名唯一 / 安卓加载失败 / runtimeAssembly 能不能改** / 植物 .pmod 时使用。
 agent_created: true
 ---
 
@@ -190,6 +190,63 @@ script = ExtResource("2")
 - 头位/炮口标定、双图层父子精灵（头独立）范式、自制 `.dat` 的 5 个必踩坑
   → `references/plant-skin.md`。
 
+**★ 「卡面 / 立绘」从哪来 + 先检查解包完整性（2026-09-28 实测，做识别/外观类 Mod 必看）**
+
+* 一个角色在 `Asset/Config/Character/CharacterResource.json` 里就是**三键 uid 引用**：
+  `{ "Packet": {"<卡key>": uid}, "Scene": uid, "Sprite": uid }`（V0.29 实测 583 条全是这个形状）
+  * `Packet` → `.../Packet/<卡key>.tres`（`TowerDefensePacketConfig`：`saveKey` / `cost` /
+    `packetAnimeOffset` / `packetAnimeScale` / `unlockCheckList` / `characterConfig`）；
+  * `Scene` → `.../Scene/TowerDefensePlant<Key>.tscn`（战斗中的植物）；
+  * **`Sprite` → 同级 `.../<Key>.tscn`** ← **这就是「卡面/立绘预览」**
+    （`AdobeAnimateSpriteBase` + `flashAnimeData` + `Animation/Clip = "Idle"`）。
+* ⇒ **卡槽里显示的不是现成 PNG，而是同一套植物精灵按 `packetAnimeOffset/Scale` 摆放**。
+  因此「换卡面」动的是**同一份资源，会同时影响卡槽与场上单位**——做外观类 Mod 必须先拍板这点。
+* ★★ **「离线取立绘」的终局答案（2026-09-28 实测 484 MB 官方 pck，三轮查证；先前两条中间结论已作废）**：
+  **发行版里根本没有 `.dat`，图片被合进了 GPU 纹理数组。**
+  1. `.dat` 是**编辑器期**资源：`[Export(PropertyHint.File,"*.dat")]` +
+     `Godot.FileAccess.Open(path, Read)`（`AdobeAnimateData.cs:447` / `:1035` / `:1293`）
+     ⇒ 它就是个普通二进制文件，但**发行 pck 里没有它**。
+     实测 `gdre_tools --headless --list-files=<pck>` ⇒ 26522 个 `res://` 条目，
+     全库含 `.dat` 的只有 `icudt_godot.dat`（ICU 数据）⇒ **330 个植物的 `.dat` 一个都没打包**。
+     （所以"解包树里找不到 `.dat`"**不是解包出错**：解包日志显示 full recover `Extracted 26522 files, no errors detected!`）
+  2. **`.tres` / `.res` 里也没有图**：`Asset/.../<Key>.tres` 的 `rasterCompositeData`
+     在 330 个植物上**全部为 `null`**；`.godot/exported/adobe_animate/**/*.res`（624 个）用
+     `gdre_tools --bin-to-txt` 转文本后与同名 `.tres` **逐字符相同**（同为 63901 字符）⇒ 只是同资源的二进制形态。
+     `animeFile` 仍写着 `res://.../<Key>.dat`，**只是残留路径字符串**（读不到会回退）。
+  3. **★ 真图集在 `.godot/imported/` 的 4 个纹理数组里**：
+     `AdobeAnimateBootstrapPoseTextureArray.exr-*.ctexarray` /
+     `AdobeAnimateVisualTextureArray.png-*.s3tc.ctexarray` /
+     `AdobeAnimateGpuPoseTextureArray.exr-*.ctexarray` /
+     `AdobeAnimateBootstrapVisualTextureArray.png-*.s3tc.ctexarray`
+     ⇒ 所有 Adobe Animate 动画的视觉纹理**合并进了 Texture2DArray**，`Pose` 那个是姿态数据。
+     （与运行时的 `AdobeAnimateDefinitionCache.GetBakedGpuPoseTexturePath`、
+     `AdobeAnimateGlobalAtlasCache` 正好对上。）
+     反向验证：`.godot/imported/` 里 3799 个 `.ctex` 中，含植物名的**只有 `Award*Custom0.png` 皮肤图**
+     （`Peashooter` 1 条、`Cactus` 6 条，全是 Award 皮肤）⇒ **植物主体图不在 `.ctex` 里**。
+  ⇒ **结论与选路**：
+  * 想**离线**取立绘 ⇒ 必须解 `.ctexarray`（Godot 压缩纹理数组 + s3tc/DXT 解压 + 数组层索引 +
+    再按 `mediaRects` 对齐切片）。**理论可行、成本高，不推荐**（也可试"用 GDRE 内置 Godot 跑一段 GDScript"导出）。
+  * ✅ **推荐路线 = 游戏内预热**：实例化 `<Key>.tscn`（或 `TowerDefenseManager.GetPacketSpriteScene`）→
+    `SubViewport` 渲染 → `GetImage()` 回读 → 算特征 → 落盘缓存。
+    零格式逆向；上游 STS2 Mod 的 `PortraitGpuImageLoader` 就是现成同款实现，可照抄。
+* ✅ 顺带（仍然成立）：`XWModProjectLayout.cs:306` 把 `<Key>.dat` 当**角色包依赖**豁免
+  ⇒ **Mod 包内可以自带 `.dat`**（自制皮肤走这条路）。
+* ⚠️ **只解了源码/资源的解包树里没有 `.dll/.exe/.pck/data_*`** ⇒ 不能编译插件、不能实机验证；
+  开发前先确认手上有**游戏本体**（`<本体>/data_PlantsVsZombies_*/PlantsVsZombies.dll` + `GodotSharp.dll` + `.pck`）。
+* **图片替换的正规入口**：`<Key>.tscn` 里逐媒体列着
+  `Animation/MediaReplace/<媒体名>.png = null` 槽位（如 `.../CactusBlover_head.png`）。
+  比"改节点 `Texture`"规矩，但**是逐媒体替换**（一个植物十几个图层），批量做不现实。
+* **「自定义皮肤」≠ 贴任意图**：`Custom/<Key>CoustomData.tres`(`CharacterCustomData`) +
+  `Custom/Config/<Key>Custom0.tres`(`CharacterCustomConfig`) 靠
+  `animeFliterOpen` / `animeFliterClose`（如 `"skin1&skin2"` / `"Blover_head&Blover_petals"`）
+  **切图层显隐**，前提是美术已在 `.dat` 里预置 `skin1..skin8` 图层。
+* **规模基准（V0.29 实测，用来判断"按图遍历全卡池"这类需求的难度）**：
+  植物目录 **330 个**（Chapter0 41 / Other 47 / Cover 28 / Star 27 / Gold 19 / …）、
+  `CharacterResource.json` **583 条**、`PacketBankResource.json` **顶层 12 个卡池**、
+  `GeneralPlant` 共 **276 张**（White188 / Gold19 / Diamond16 / Colour6 / Star27 / Original20，
+  `Include: ["OriginalPlant"]`）。
+  ⚠️ 与旧口径（V0.28 的"22 池 / White178"）不同，引用数字时**先按手上的版本核一遍**。
+
 ### Step 7 — 让卡「能被选到」+ 进图鉴（**只有需要时才做**）
 
 因果链：
@@ -229,16 +286,23 @@ override 里**只写 `coverCanDirectPlant` 一个字段**（其余默认值全�
 
 ### Step 9 — 需要插件时（决定 B）
 
-四条硬约束（写错 = **整包被拒/回滚**）：
+五条硬约束（写错 = **整包被拒/回滚**）：
 
-1. `runtimeAssembly` **必须恰好是字面量** `"Runtime/ModAssembly.dll"`；
+1. `runtimeAssembly` **必须恰好是字面量** `"Runtime/ModAssembly.dll"`（**这是包内物理路径，不许改**）；
 2. `runtimeApiVersion` **必须恰好 `1`**；入口三个回调**一律 try/catch 绝不抛**（抛 = 无条件整包回滚）；
 3. `provides`/`overrides` 非空时，包内**每个**被识别的文件都必须在里面声明；
-4. `Runtime/` 目录**只许有一个** `ModAssembly.dll`（`.dll/.exe/.bat/.cmd/.ps1/.cs/.gd` 都算可执行文件，多一个就拒收）。
+4. `Runtime/` 目录**只许有一个** `ModAssembly.dll`（`.dll/.exe/.bat/.cmd/.ps1/.cs/.gd` 都算可执行文件，多一个就拒收）；
+5. ★★★ **`.csproj` 必须写 `<AssemblyName>【本 Mod 的 <Key>】</AssemblyName>`** ——
+   **安卓**的 DLL 加载方式与 PC 不同（全 Mod 共用一个非可回收上下文，程序集名撞车直接
+   `Android Mod assemblies share one non-collectible context, so main assembly names must be unique`）；
+   而 `mod.json` 的 `runtimeAssembly` **仍保持** `"Runtime/ModAssembly.dll"` 不变
+   （容器里的文件名永远是它，变的是**程序集身份**）。
+   构建脚本取产物要写成 `os.path.join(out_dir, ASSEMBLY_NAME + ".dll")` 再改名为 `ModAssembly.dll` 装机。
+   **依据 + 三条自检 → `references/plant-runtime-plugin.md` §1.1**。
 
 配方（已实测）：概率大招、逐颗连射、真随机、**掐掉原版开火链**、**修「动画静止」**、
 **与僵尸版「共用判定逻辑」（共享源文件 + 两问守卫）**
-→ `references/plant-runtime-plugin.md`（§7 讲共用源文件的坑）。
+→ `references/plant-runtime-plugin.md`（§1.1 程序集名，§7 讲共用源文件的坑）。
 
 ### Step 10 — 写/跑闸门（**这一步不能省**）
 
@@ -359,3 +423,219 @@ override 里**只写 `coverCanDirectPlant` 一个字段**（其余默认值全�
 | `references/plant-verification.md` | Step 10 写闸门、结果可疑、实机前 |
 | `references/plant-pmod-hotpatch.md` | **只有 .pmod 没有生成器**，直接热补丁数值属性（cost/射速/血量…）时 |
 | `assets/新建植物清单.md` | **Step 0 一开始就打开**，逐项打勾 |
+
+---
+
+## ★★ 最省事的「复用内置角色」路线（2026-09-29 实测：经典模仿者 Mod）
+
+当需求是「**内置某植物的行为不对，但不要改它，另建一个植物**」时，**不要**照 §3 的 12 步全套走
+（那套是给"全新美术 + 全新机制"的）。可以只生成 **6 个资源文件**，外观/组件全部 `instance` 内置的。
+
+### 做法
+
+```ini
+# <Key>/Scene/<Key>.tscn —— 整个角色场景直接 instance 内置角色场景
+[gd_scene format=3]
+[ext_resource type="PackedScene" path="res://Asset/Anime/Character/Plant/Chapter0/Imitater/Scene/TowerDefensePlantImitater.tscn" id="1"]
+[ext_resource type="Resource" path="../Config/TowerDefensePlant<Key>.tres" id="2"]
+[ext_resource type="Resource" path="./<Key>ComponentSet.tres" id="3"]
+
+[node name="<Key>" instance=ExtResource("1")]
+ComponentSet = ExtResource("3")
+config = ExtResource("2")
+# 需要改的内置 [Export] 字段直接在这里覆盖（instance 节点可以覆盖任何导出属性）
+metadata/mod_resource_kind = "Character"
+metadata/mod_display_name = "…"
+metadata/mod_character_category = "Plant"
+metadata/mod_character_config_path = "../Config/TowerDefensePlant<Key>.tres"
+metadata/mod_character_sprite_scene = "../Sprite/<Key>.tscn"
+```
+
+```ini
+# <Key>/Sprite/<Key>.tscn —— 精灵场景同样直接 instance
+[gd_scene format=3]
+[ext_resource type="PackedScene" path="res://Asset/Anime/Character/Plant/Chapter0/Imitater/Imitater.tscn" id="1"]
+
+[node name="<Key>" instance=ExtResource("1")]
+metadata/mod_resource_kind = "CharacterSprite"
+```
+
+```ini
+# <Key>/Scene/<Key>ComponentSet.tres —— 直接继承内置的组件定义
+[resource]
+script = ExtResource("3")            # CharacterComponentSet.cs
+ParentSet = ExtResource("2")         # res://Prefab/TowerDefense/Character/ComponentSets/TowerDefensePlantComponentSet.tres
+Components = [ExtResource("1")]      # 内置角色的 xxxExplodeDefinition.tres / FireComponent 定义
+```
+
+**因为 instance 的是完整内置场景**（它自带 `ComponentSet = …`），所以 **Step 4 那条"必须显式声明
+ComponentSet"的坑不适用** —— 但**仍要**在 `metadata/mod_character_sprite_scene` 指向**包内**精灵场景，
+否则 `XWModContentValidation` 会因为查不到 `CHARACTER_SPRITE[<Key>]` 而 throw。
+
+### ⛔⛔ 但"只 instance 内置场景、不写 C#"这条路**跑不通**（2026-09-29 实测定案）
+
+**症状**：Mod 加载成功、卡能显示能选，但**种下时报**：
+
+```
+WARNING: [TowerDefenseManager] Mod 角色脚本实例化失败，回退内置场景路径：<Key>: 角色场景缺少 CompanionOnly 伴随脚本元数据。
+```
+
+⇒ **种出来的其实是内置角色**，于是走了内置角色的技能
+（本次实例：新模仿者被种下后按内置模仿者的 `Explode()` **随机变身**）。
+
+**机制**（`addons/ModEditor/ModSystem/XWModCharacterCompanionRuntime.cs:160-220` `TryCreateInstance`）：
+1. 实例化 Mod 的场景 → `authoredRoot`
+2. 读它的元数据 `mod_character_script_binding` 与 `mod_character_script_path`
+3. **`binding` 必须恰好是字面量 `"CompanionOnly"`，且 `path` 非空**，否则直接失败
+4. `expectedTypeName = Path.GetFileNameWithoutExtension(path)`
+   （如 `./ImitaterClassic.tscn` → `ImitaterClassic`；⚠️ **别用 `.cs`**，会被判可执行文件拒包）
+5. 在 **Mod 的 DLL** 里找满足 `!IsAbstract && Name == expectedTypeName
+   && authoredRoot.GetType().IsAssignableFrom(type)` 的类型
+6. `Activator.CreateInstance(type)` **反射建实例**，再把壳节点的**属性 + 子节点**搬过去，丢弃壳
+
+⇒ **Mod 角色 = 「壳场景（instance 游戏 Prefab）+ DLL 里一个同名 C# 类」**，两者缺一不可。
+包内的**声明文件**只被"取文件名"，但 ⛔ **不能用 `.cs`** ——
+`ModLoader.IsExecutablePackageFile` 的扩展名白名单**包含 `.cs`**（还有 `.gd`/`.bat`/`.exe`/`.cmd`/`.ps1`），
+包内出现它会被判 `undeclared executable package file`、**整包拒收**。
+⇒ **正确做法：`mod_character_script_path` 直接指向场景文件自己（`./<Key>.tscn`）** ——
+   引擎只做 `Path.GetFileNameWithoutExtension()`，**不读文件内容**，类名同样是 `<Key>`。
+
+⚠️ 结论：**"纯数据复用内置角色、一行 C# 都不写"是不成立的** —— 引擎一定会走 Companion 通道。
+如果实在不想写 C# 逻辑，**至少也要放一个空的 `public partial class <Key> : <基类> { }`**。
+
+**官方生成器模板**（`addons/ModEditor/FileSystem/XWResourceCreateRoute.cs:754` 的格式串，照抄即可）：
+
+```ini
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="PackedScene" path="res://Prefab/TowerDefense/Character/TowerDefensePlant.tscn" id="1_base"]
+[ext_resource type="Resource" path="../Config/{Key}Config.tres" id="3_config"]
+[ext_resource type="PackedScene" path="../Sprite/{Key}.tscn" id="4_sprite"]
+
+[node name="{Key}" node_paths=PackedStringArray("sprite") instance=ExtResource("1_base")]
+config = ExtResource("3_config")
+sprite = NodePath("SpriteGroup/TransformPoint/{Key}Sprite")
+metadata/mod_resource_kind = "Character"
+metadata/mod_display_name = "{中文名}"
+metadata/mod_character_category = "Plant"
+metadata/mod_character_config_path = "../Config/{Key}Config.tres"
+metadata/mod_character_script_path = "./{Key}.tscn"
+metadata/mod_character_script_binding = "CompanionOnly"
+metadata/mod_character_sprite_scene = "../Sprite/{Key}.tscn"
+
+[node name="{Key}Sprite" parent="SpriteGroup/TransformPoint" instance=ExtResource("4_sprite")]
+position = Vector2(0, -30)
+
+[editable path="SpriteGroup/TransformPoint/{Key}Sprite"]
+```
+
+DLL 侧：`public partial class <Key> : <authoredRoot 的基类> { }`（可空壳；
+`IsAssignableFrom` 要求它继承**壳场景根节点的类型**，不是随便找个基类）。
+
+### ★ 想改内置脚本里"硬编码的卡池/分类"时：换个自定义 bank，别复刻逻辑
+
+典型案例：内置模仿者 `TowerDefensePlantImitater.Explode()` 里写死了
+`packetBankData.GetCategory("White") + packetBankData.GetCategory("Original")`，
+`Explode()` 又**不是 virtual** 无法覆写，而 Mod 的 `.cs` 也**不能进包**（会被判可执行文件拒收）。
+
+⇒ 正解：**运行时注册一个自定义卡池**，把内置硬编码要取的那个分类名（这里是 `White`）
+直接填成你真正想要的卡列表：
+
+```csharp
+var rm = ResourceManager.Instance;
+var data = new TowerDefensePacketBankData();
+data.category["White"] = 你的卡 key 列表;      // ← 填进"内置硬编码会读的那个分类名"
+data.category["Original"] = new Godot.Collections.Array();
+rm.TOWERDEFENSE_PACKETBANKS["你的Bank名"] = data;   // Dictionary 可写（属性是 private set，但内容可改）
+```
+
+再把角色场景的 `packetBank = "你的Bank名"` ⇒ 零逻辑复刻、零副作用、不动内置资源。
+（`TowerDefenseManager.GetPacketBankData(name)` 就是从这个字典查的。）
+
+需要"随机抽卡"时：`GetPacketBankData(bank).GetCategory("White").PickRandom()`，
+再 `TowerDefenseManager.GetPacketConfig(key)`。
+⚠️ **别忘了把自己的卡排除掉**，否则随机抽到自己 → 死循环。
+
+### 卡池分类名与 `PACKET_TYPE` 数值
+
+```
+NOONE=-1, WHITE=0, GOLD=1, DIAMOND=2, COLOUR=3, STAR=4, ORIGINAL=5, ZOMBIE=6, COVER=7, GRAY=8
+```
+（内置模仿者卡片写的是 `type = 5` = **ORIGINAL**，不是 STAR —— 别数错。）
+
+要进选卡/图鉴：往 `TOWERDEFENSE_PACKETBANKS["GeneralPlant"].category["<分类>"]` 追加卡 key
+（check-then-add 幂等），并补 `Include` 闭包里的派生库（实测只有 `Total`）。
+
+### 自写打包脚本的两个必踩坑（2026-09-29 实测）
+
+1. **资源忘进包**：手写 `zipfile` 时很容易只写 `mod.json` + `Runtime/ModAssembly.dll`，
+   把 `Resources/` 整个漏掉（包会小得可疑，加载期报"缺少 CharacterSprite"）。
+   ⇒ 必须 `os.walk(Resources)` 全部写入。
+2. **"mod.json 在根"的护栏写成 `sorted(namelist)[0]`** ⇒ **必然误报**：
+   排序后 `Resources/...` 排在 `mod.json` 前面（`'R'`=82 < `'m'`=109）。
+   ⇒ 用 **`z.namelist()[0]`（写入顺序）** 判断，并补一条
+   "`mod.json.resources` 声明 vs 包内实际文件"的一致性断言（两边排序后逐项比对）。
+
+---
+
+### ★ 「Mod 植物」页签是 ModLoader 自动加的 —— 想去掉只能在运行时做（2026-09-29 定案）
+
+**现象**：装了带卡片（`provides.Packet`）的 Mod 后，选卡界面右上角**必然**多出一个
+「Mod 植物」页签，图鉴里也多一类。**`mod.json` 里没有任何开关能关掉它。**
+
+**源码证据**：
+- `addons/ModEditor/ModSystem/XWModContentCatalog.cs:107` `WithPlants(original)`：
+  **深拷贝**传入卡池，再 `category["ModPlants"] = 所有 Mod 植物 Packet 的 key`。
+  收集条件（`GetPackets(plants:true)`）：`characterConfig is TowerDefensePlantConfig`
+  **且** `TOWERDEFENSE_CHARCATERS` 含它 **且** `CHARCTAER_SPRITE` 含它
+  ⇒ 所以你必须同时 `provides` **Character + CharacterSprite + Packet** 才会被收进去。
+- **调用点**：选卡界面 `TowerDefenseBattleFeaturePacketBank.SetPacketBankData()` L248
+  （仅当 `packetBankType == "GeneralPlant"` 且 seedBank 是 `CHOOSE` 模式）；
+  图鉴 `Almanac.cs:219`。
+- `TowerDefenseBattleFeaturePacketBank.cs:250`：页签按钮是 `cardSort/CardMod`，
+  `Visible = packetBankData.category.ContainsKey("ModPlants")`。
+
+**⛔ 为什么不能"干脆不声明 `provides.Packet`"**：
+`TowerDefensePacketConfig.Unlock()` → `XWModPlayerProgressService.TryPacketUnlock()`
+先查 `GetContentOwner("Packet", saveKey)`：
+- 非 Mod 卡（owner 空）⇒ 落到原逻辑 ⇒ **`unlockCheckList` 为空时 `return false`（判定未解锁）**
+  ⇒ 卡变灰点不动；
+- Mod 卡 + `unlockCheckList` 为空 ⇒ `unlocked = true` ✅（正是我们要的"开局即解锁"）。
+⇒ **必须声明 `provides.Packet`。**
+
+**运行时去掉的办法**（要"只出现在钻卡页"时）：
+```csharp
+// 1) 全局卡池：往目标分类追加自己的 key（check-then-add 幂等）
+var gp = TowerDefenseManager.GetPacketBankData("GeneralPlant");
+var arr = gp.category["Diamond"].AsGodotArray();
+if (!arr.Contains(MyKey)) { arr.Add(MyKey); gp.category["Diamond"] = arr; }
+
+// 2) 关卡内的卡池副本：从 ModPlants 摘掉自己
+var pb = (TowerDefensePacketBankData)GetMember(bankFeature, "packetBankData");  // 反射
+if (pb.category.ContainsKey("ModPlants")) {
+    var mp = pb.category["ModPlants"].AsGodotArray();
+    mp.Remove(MyKey);
+    if (mp.Count > 0) pb.category["ModPlants"] = mp;   // 还有别的 Mod 卡 ⇒ 只摘自己
+    else {
+        pb.category.Remove("ModPlants");
+        // ★ 必须手动隐藏按钮：它的 Visible 只在 SetPacketBankData() 里设过一次
+        var btn = ((Node)GetMember(GetMember(bankFeature,"packetBank"), "cardSort"))
+                  ?.GetNodeOrNull<Control>("CardMod");
+        if (btn != null) btn.Visible = false;
+    }
+}
+```
+⚠️ **只摘自己的 key，别删别人的**（`ModPlants` 里可能还有其它 Mod 的卡）。
+⚠️ 每帧跑（进关卡时 `packetBankData` 会被 `WithPlants()` 重新构造）。
+
+**追加到目标分类不会"冲突"**：两个分类引用同一个 key，选中/取消行为一致，
+只是玩家在两个页签都能看到这张卡。
+
+### 让卡"条件不满足时不可选"的最省事做法
+
+把 `TowerDefenseInGamePacketShow.alive` 置 `false`：
+- `alive` 的 setter 会调 `ColorSet()` ⇒ **卡面变灰**；
+- `Pressed()` 的守卫 `else if ((alive || allowPressWhenUnavailable) && !(pressDelayTimer > 0))`
+  ⇒ 点下去**完全没反应**。
+⚠️ **跳过 `select == true`（已入组）和 `@lock == true` 的卡** —— 卡入组时游戏自己会把
+   `alive` 设为 false，那是正常状态，不能被你的"恢复 true"覆盖掉。

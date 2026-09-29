@@ -15,10 +15,11 @@
 
 > `overrides` 覆盖原版 `FireComponent` **污染面太大**（波及所有植物），**不建议**。
 
-## 1. 四条硬约束（写错 = 整包被拒 / 回滚）
+## 1. 五条硬约束（写错 = 整包被拒 / 回滚）
 
 1. `runtimeAssembly` **必须恰好是字面量** `"Runtime/ModAssembly.dll"`
    （`ModLoader.cs:329-333` + `ResolveDeclaredRuntimeAssembly:918`）—— 写别的路径**硬拒**，`policy` 救不了。
+   ⚠️ 这是**包内物理路径**，**不是**程序集身份 —— 程序集身份另有一条安卓专属协定，见 **§1.1**。
 2. `runtimeApiVersion` **必须恰好 `1`**，否则入口 init 返回 false → **无条件整包回滚**；
    `TryInitializeRuntimeEntry` 失败（`ModLoader.cs:667-671`）同样是**不设防硬拒**，
    连 `policy="optional"` 都保不住 ⇒ **三个回调必须 try/catch**。
@@ -28,9 +29,62 @@
 4. `resources` 必须 == `XWModManifestSyncService.SyncProject` 的规范序：**所有**非忽略文件、
    `OrdinalIgnoreCase` 升序 —— 否则**编辑器一打开工程就重写 `mod.json`**。
    含 `Runtime/ModAssembly.dll`。
+5. ★★★ **`.csproj` 必须写 `<AssemblyName>【本 Mod 的 <Key>】</AssemblyName>`**（安卓要求主程序集名唯一），
+   而 `mod.json` 的 `runtimeAssembly` **仍**保持 `"Runtime/ModAssembly.dll"` ⇒ 详见 **§1.1**。
 
 `runtimeAssemblyPolicy: "optional"` ⇒ `IsRuntimeAssemblyRequired() == false`
 ⇒ 程序集加载失败**不连坐**整包（**新 Mod 建议先 optional**）。
+
+### 1.1 ★★★ 跨平台（安卓）程序集标识：`.csproj` 必须写 `<AssemblyName>`，`mod.json` 保持不变
+
+> 安卓的系统 DLL 加载方式与 PC **不同** ⇒ **程序集身份**（`AssemblyName`）必须每个 Mod 唯一；
+> 而包内**物理文件名**（`runtimeAssembly`）**一字不改**。**两个名字是两回事。**
+
+| 名字 | 写在哪 | 值 | 能改吗 |
+|---|---|---|---|
+| **包内物理路径** | `mod.json` → `runtimeAssembly` | **恰好** `"Runtime/ModAssembly.dll"` | ❌ 硬校验，改 = **整包被拒** |
+| **程序集身份** `AssemblyName` | `.csproj` → `<AssemblyName>` | **本 Mod 的 `<Key>`**，如 `SuperGatlingPea` | ✅ **必须改成自己的** |
+
+```xml
+<PropertyGroup>
+  <!-- ★ 默认/照抄会给成 ModAssembly（= 包内文件名），安卓上会和别的 Mod 撞车 -->
+  <AssemblyName>SuperGatlingPea</AssemblyName>
+</PropertyGroup>
+```
+
+**为什么（源码实测，`addons/ModEditor/ScriptEditor/Compiler/XWModAssemblyLoader.cs`）**：
+
+* **PC**：走 `:195-197` 的 `ModLoadContext`（`:188 bool flag = !OperatingSystem.IsAndroid();`）
+  —— **每个 Mod 一个独立可回收 ALC** ⇒ 两个都叫 `ModAssembly` 的程序集互不干扰，
+  所以这个坑在 Windows 上**永远不暴露**。
+* **安卓**：走 `:191-193` 的 `LoadAndroidAssembly` —— 全 Mod 共享**一个非可回收上下文**。
+  它按**简单程序集名**（`assemblyName.Name`，`OrdinalIgnoreCase`）在静态表 `AndroidLoadedAssemblies`
+  （`:151`）里记账（`:299-315`），撞上就 `throw BuildAndroidAssemblyConflict(...)`（`:314`，定义 `:338-341`）：
+  > `Android Mod '<id>' cannot load assembly '<requested>'. … Android Mod assemblies share one
+  > non-collectible context, so **main assembly names must be unique**.`
+  ⇒ **所有 Mod 都叫 `ModAssembly` 时，安卓上第二个 Mod 直接加载失败**。
+* 第二条闸（`:316-324`）：与**当前 AppDomain 里任何已加载程序集**同名（`OrdinalIgnoreCase`）也抛
+  ⇒ 名字别撞游戏自己的（`PlantsVsZombies` / `GodotSharp`）。
+* 主程序集（`isMainAssembly: true`）**一律必须唯一**，无例外。
+
+**而 `mod.json` 必须**保持 `Runtime/ModAssembly.dll` —— 字面量硬校验（`ModLoader.cs:330`
+`!text.Equals("Runtime/ModAssembly.dll", StringComparison.Ordinal)` ⇒ `InvalidDataException`；
+`:918` 还额外禁 `..`/根路径/`:`）。⇒ **容器里那个文件永远叫 `ModAssembly.dll`。**
+
+**构建脚本跟着改一行**（否则报「编译产物里没有 ModAssembly.dll」）：
+```python
+ASSEMBLY_NAME = "SuperGatlingPea"                       # == csproj <AssemblyName> == 本 Mod <Key>
+src = os.path.join(out_dir, ASSEMBLY_NAME + ".dll")     # 构建产物：<AssemblyName>.dll
+TARGET_DLL = os.path.join(MOD_DIR, "Runtime", "ModAssembly.dll")   # 装机名：**不变**
+```
+
+**改名安全**：入口按 **`Type.FullName`** 匹配（`XWModCharacterCompanionRuntime.cs:105`）、
+`CompanionOnly` 伴随脚本按 **`type.Name`** 匹配（`:185-186`）—— **都与程序集名无关**
+⇒ 只改 csproj 的 `<AssemblyName>` + 构建脚本取产物名；`mod.json` / 场景 `script` /
+meta `mod_character_script_path` **一律不动**。
+
+> ⚠️ **共享源文件的两个工程（植物版 / 僵尸版）各自要有自己的 `<AssemblyName>`**
+> —— 它们本来就要求主程序集名唯一，这也正好符合安卓的要求。见 §7。
 
 ## 2. `Runtime/` 目录只许有一个文件
 
@@ -183,6 +237,8 @@ python build_runtime.py --godot-ref-dir "<游戏目录>\data_PlantsVsZombies_win
 
 * `dotnet build <Xxx>Runtime.csproj -c Release`；GodotSharp 引用目录优先取 `--godot-ref-dir`，否则回落内置候选。
 * ⚠️ **csproj 必须 `<Compile Remove="check_*.cs" />`** —— 否则探针脚本（顶级语句）会被编进库 → **CS8805**。
+* ★★★ **csproj 必须写 `<AssemblyName>【本 Mod 的 <Key>】</AssemblyName>`**（**不要写 `ModAssembly`**）——
+  安卓要求主程序集名唯一，见 **§1.1**；构建脚本按 `<AssemblyName>.dll` 取产物再改名为 `ModAssembly.dll` 装机。
 * 装机**只放 `ModAssembly.dll`**，别带 `.pdb` / `.deps.json`。
 * ⚠️ 本机有**两份构建** ⇒ 引用目录/闸门**各跑一遍**。
 
