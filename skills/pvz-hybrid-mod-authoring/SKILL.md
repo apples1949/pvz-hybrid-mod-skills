@@ -4644,12 +4644,59 @@ adb shell "run-as $P rm -f files/Mods/mod_boot_journal.json files/Mods/mod_last_
 > 没有 adb（纯手机操作）时还有两条路：**root 文件管理器**直接改 `/data/data/<pkg>/files/`，
 > 或用 **MT 管理器的文件注入器**把本地存储路径挂给游戏（具体做法见下一节）。
 
-### 三、不通过 adb：用 MT 管理器的「文件注入器」增加本地存储路径
+### 三、不通过 adb（也不 root）：MT 管理器的「注入文件提供器」
 
-> 📌 本节待补：具体操作步骤按用户实测流程填写（用户已实践，但尚未提供逐步骤说明）。
-> 已确认的要点：
-> - 目的：让**没有 adb、也不想 root** 的设备，仍能把 Mod 从**本地存储**（如 `/sdcard/PVZHE_MOD`）
->   交给游戏读取，而不必往私有目录写。
-> - 工具：MT 管理器的**文件注入器**（往 APK 里注入文件/路径）+ 重新签名。
-> - 与第 ① 节的关系：同样是「改包 → 签名 → 重装」的流程，区别在于注入的是**路径/配置文件**
->   而不是 manifest 属性。
+> 依据 MT 官方文档 <https://mt.cc/guide/reverse/inject-documents-provider.html>（2026-10-15 核对）
+
+**原理**：往 APK 里**注入一个专门构造的 `DocumentsProvider`**，把应用的 `data` 目录
+（含 `files/`私有目录）以系统标准的「文件提供器」形式对外暴露；再配合 MT 的**「本地存储」**
+功能挂载它 ⇒ **无需 ROOT** 就能浏览与修改 `/data/data/<包名>/` ✓。
+
+**操作步骤（手机端全程可完成，不需要电脑）**：
+
+1. MT 管理器里找到游戏 APK → 点击底部/菜单的 **「功能」** → 选择 **「注入文件提供器」**；
+2. 处理完成后得到一个 **`xxx_dp.apk`**（原包名 + `_dp`）；
+3. **安装这个 `xxx_dp.apk`，并把它打开一次**（关键：必须启动一次，Provider 才会被系统注册）；
+   ⚠️ 与原版签名不同 ⇒ 装之前先备份存档/Mod，装的时候可能需要先卸载原版；
+4. 回到 MT → 打开**侧拉栏** → 点右上角 **「添加本地存储菜单」** →
+   在新界面的侧拉栏里选中**目标 APP** → 点底部 **「选择」**；
+5. 返回 MT，侧拉栏里就多了一个「本地存储」，点进去即可**访问与修改该 APP 的 data 目录** ✓。
+
+**它导出的四个目录**：
+
+| 显示名 | 真实路径 |
+|---|---|
+| `android_data` | `/sdcard/Android/data/<包名>` |
+| `android_obb` | `/sdcard/Android/obb/<包名>` |
+| `data` | `/data/data/<包名>` 或 `/data/user/0/<包名>` ← **Mod/日志/存档都在这下面** |
+| `user_de_data` | `/data/user_de/0/<包名>`（需 MT ≥ 2.14.3）|
+
+**支持的操作**：浏览列表、新建/删除/修改/重命名/移动文件、查看权限与所有者、
+修改权限和时间、创建软链接（**不支持**修改文件所有者）。
+
+**第三方文件管理器**：只要支持 `DocumentsProvider` 也能访问，但这些是 MT 定制接口 ⇒
+第三方工具**无法**：判断软链接、查看权限与所有者、修改权限和时间、创建软链接。
+
+**方案优势**：基于系统标准 `DocumentsProvider`，**Android 5.0+** 通用，未来兼容性好。
+（早期社区常用的 `sharedUserId` 需要两个 APK 同签名，且 Google 已宣布未来移除。）
+
+**⚠️ 局限**：它本质是**改 APK** ⇒ 如果 APK 带**自校验**，可能直接失效或闪退。
+
+**对本项目的用法（等效替代 adb）**：
+
+```
+MT → 本地存储 → data → /data/data/xvwugame.PlantsVsZombies/files/
+  ├── Mods/              ← 放 .pmod、改 enabled_mods.json、删 mod_boot_journal.json
+  ├── ModsCache/         ← 删 <modid> 强制重新解包
+  └── logs/godot.log     ← 实时日志（当次会话）
+```
+
+⇒ 手机端一条龙：改包（注入 Provider）→ 挂本地存储 → 直接编辑 `files/` 下的 Mod 与配置 ✓
+
+**与第 ① 节的区别（两条路互不替代）**：
+
+| 方案 | 谁能读写 `data/` | 适用场景 |
+|---|---|---|
+| ① `android:debuggable="true"` | **电脑上的 adb**（`run-as`）| 批量推包、脚本化、看日志 |
+| ③ 注入 `DocumentsProvider` | **手机上 MT 的「本地存储」** | 没电脑、现场改文件、无 adb |
+
