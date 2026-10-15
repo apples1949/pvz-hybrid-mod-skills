@@ -4546,3 +4546,110 @@ private static void Log(string msg)
 4. 加"刚拿起的 300ms 内不判定" + "落点在铲子按钮矩形内不判定"两道护栏；
 5. 性能：遍历 9×6 格 + 每格几次反射**只在点击那一下执行**（不点击时 0 开销），量级亚毫秒 ✓
    —— 不必担心掉帧，但**别放进 `_Process` 每帧跑**。
+
+
+---
+
+## ★★ 安卓侧文件读写：debug 属性 / adb / MT 注入器（2026-10-15）
+
+> 前面「手机端取证与部署」讲的是**怎么部署与看日志**；这一节讲**怎么让设备具备读写权限** ——
+> 官方发布包的私有目录默认读不到，下面三条路线按可用性从高到低排列。
+
+### 一、给安装包加 `debug` 属性（让 `run-as` 可用）
+
+**为什么需要**：游戏把 Mod、日志、存档都放在**应用私有目录**
+（`/data/data/<pkg>/files/…`）。要读它只有两条路：root，或者 APK 声明
+`android:debuggable="true"`（此时 `adb shell run-as <pkg>` 可以以应用身份访问）✓。
+官方发布包的 manifest 里是 `false` ✗，所以 `run-as` 会直接报
+`run-as: package not debuggable`。
+
+**做法（MT 管理器，手机端即可完成，不需要电脑）**：
+
+1. 备份你的**存档与 Mod**（卸载重装会清空私有目录）：
+   在游戏里能导出的先导出；或用 MT 进 `/data/data/<pkg>/files/`（需 root）复制出来。
+2. MT 管理器 → 找到游戏 APK → 长按 → **「APK 编辑」→「AndroidManifest.xml」**
+   （MT 能直接编辑**二进制** manifest，不用反编译）。
+3. 在 `<application …>` 标签里加一个属性：
+
+   ```xml
+   <application android:debuggable="true" android:label="…" …>
+   ```
+
+4. 保存 → 返回 → **「签名」**（用 MT 的默认签名或你自己的 keystore）。
+5. **卸载原版 → 安装改过的包**（签名不同不能覆盖安装；这也是为什么第 1 步要备份）。
+
+**做法（电脑端 apktool 路线，等价）**：
+
+```bash
+apktool d game.apk -o game_src
+# 编辑 game_src/AndroidManifest.xml：<application android:debuggable="true">
+apktool b game_src -o game_patched.apk
+apksigner sign --ks my.keystore game_patched.apk       # 必须重新签名
+adb install -r game_patched.apk                        # 签名变了，通常要 -r 或先卸载
+```
+
+**验证（必做）**：
+
+```bash
+adb shell run-as xvwugame.PlantsVsZombies ls files/     # 有输出 = ✓ 成功
+adb shell run-as xvwugame.PlantsVsZombies id            # 显示 uid=… 即权限正常
+```
+
+> ⚠️ 加 `debuggable` 只是让**你自己**能 `run-as`；它不会改变游戏行为，
+> 但会让 APK 更容易被其它 App 读取私有数据 —— 自用无妨，别拿去分发。
+
+### 二、通过 adb 读写游戏文件
+
+前提：上面第 ① 步已完成（`run-as` 可用）。
+
+**读**：
+
+```bash
+P=xvwugame.PlantsVsZombies
+adb shell run-as $P ls -la files/                     # 私有目录总览
+adb shell run-as $P ls files/Mods/                    # 已装 Mod
+adb shell run-as $P cat files/Mods/enabled_mods.json  # 启用列表
+adb shell run-as $P md5sum files/Mods/X.pmod          # 校验
+adb shell run-as $P cat files/logs/godot.log          # 实时日志（见前一节）
+```
+
+**写**（`X.pmod` 这类二进制必须是 base64 管道，**不要**用 `cat >`）：
+
+```bash
+base64 -w0 X.pmod > /tmp/x.b64
+cat /tmp/x.b64 | adb shell "run-as $P sh -c 'base64 -d > files/Mods/X.pmod'"
+adb shell "run-as $P md5sum files/Mods/X.pmod"        # 必须与本地一致
+```
+
+**必须知道的四条边界**：
+
+| 边界 | 说明 |
+|---|---|
+| `run-as` **读不到 `/sdcard`** | 私有目录与共享存储是两个世界；`adb push` 到 `/sdcard` 后 `run-as` 够不着 ⇒ 一律用 base64 直写私有目录 |
+| `adb shell … cat > 文件` 会**截断二进制** | 曾因此毁掉 11 个 `.pmod` 包 ✗；永远是 base64 管道 + md5 校验 |
+| 改文件**前先停游戏** | 游戏运行时会持有/回写 `enabled_mods.json`、`ModsCache`，边跑边改会互相覆盖 |
+| 改完**清引导日志** | `rm -f files/Mods/mod_boot_journal.json files/Mods/mod_last_good.json`，否则下次启动进**零 Mod 安全模式**（见前一节） |
+
+**常用的一键组合**：
+
+```bash
+P=xvwugame.PlantsVsZombies
+adb shell pidof $P || echo "未运行 ✓"                                  # ① 确认没在跑
+adb shell "run-as $P rm -rf files/ModsCache/<modid>"                   # ② 清解包缓存
+base64 -w0 X.pmod | adb shell "run-as $P sh -c 'base64 -d > files/Mods/X.pmod'"  # ③ 推包
+adb shell "run-as $P md5sum files/Mods/X.pmod"                         # ④ 校验
+adb shell "run-as $P rm -f files/Mods/mod_boot_journal.json files/Mods/mod_last_good.json"  # ⑤ 清引导
+```
+
+> 没有 adb（纯手机操作）时还有两条路：**root 文件管理器**直接改 `/data/data/<pkg>/files/`，
+> 或用 **MT 管理器的文件注入器**把本地存储路径挂给游戏（具体做法见下一节）。
+
+### 三、不通过 adb：用 MT 管理器的「文件注入器」增加本地存储路径
+
+> 📌 本节待补：具体操作步骤按用户实测流程填写（用户已实践，但尚未提供逐步骤说明）。
+> 已确认的要点：
+> - 目的：让**没有 adb、也不想 root** 的设备，仍能把 Mod 从**本地存储**（如 `/sdcard/PVZHE_MOD`）
+>   交给游戏读取，而不必往私有目录写。
+> - 工具：MT 管理器的**文件注入器**（往 APK 里注入文件/路径）+ 重新签名。
+> - 与第 ① 节的关系：同样是「改包 → 签名 → 重装」的流程，区别在于注入的是**路径/配置文件**
+>   而不是 manifest 属性。
